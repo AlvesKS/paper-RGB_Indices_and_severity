@@ -1,0 +1,2952 @@
+---
+title: "Untitled"
+author: "Kaique"
+date: "25/10/2020"
+output: html_document
+---
+
+# Necessary packages
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(FIELDimageR)
+library(raster)
+library(readxl)
+library(gsheet)
+library(foreach)
+library(agricolae)
+library(reshape2)
+library(cowplot)
+library(gbm)
+library(lime)
+library(lme4)
+library(DescTools)
+library(factoextra)
+library(FactoMineR)
+library(corrplot)
+library(magick)
+library(patchwork)
+library(forcats)
+library(ggdist)
+```
+
+# Example of RGB indices for one image
+
+Load pictures names
+
+```{r}
+pics<-list.files("./pics/01-soybean-rust-bg-blue")
+length(pics)
+# write(pics, "pics_names.txt")
+
+```
+
+List of RGB-based spectral indices to be calculated in the image
+
+```{r}
+# Vegetation indices
+index = c("BI","SCI","GLI","HI","SI","VARI","HUE","BGI","NGRDI")
+```
+
+Load a single image
+
+```{r}
+#Choose one image to prepare the pipeline
+EX.L1<-stack(paste("./pics/01-soybean-rust-bg-blue/",pics[110],sep = ""))
+EX.L1<-aggregate(EX.L1, fact=7)
+EX.L.Shape<-fieldPolygon(mosaic=EX.L1, extent=T, plot =T)
+# plotRGB(EX.L.Shape)
+```
+
+```{r}
+EX1.Indices<- fieldIndex(mosaic = EX.L1,
+                         index = index, 
+                         myIndex = c("Blue"), plot = T)
+```
+
+```{r}
+plot(EX1.Indices$Blue)
+hist(EX1.Indices$Blue)
+```
+
+### mask
+
+```{r}
+# EX.L2<-fieldMask(mosaic=EX.L1, myIndex = "Red", cropValue=200, cropAbove=T, plot = T)
+# EX.L2<-fieldMask(mosaic=EX.L1, index = "BI", cropValue=1, cropAbove=F, plot = T)
+EX.L2<-fieldMask(mosaic=EX.L1, myIndex = c("Blue"), cropValue=90, cropAbove=T, plot = T)
+# plotRGB(EX.L2$newMosaic)
+plotRGB(EX.L2$newMosaic)
+
+
+class(EX.L2$mask)
+```
+
+```{r}
+rgb_fig = RStoolbox::ggRGB(EX.L2$newMosaic,
+                 r = 1,
+                 g = 2,
+                 b = 3)+
+  theme_void()+
+  coord_fixed()
+```
+
+```{r}
+cut = mask(EX.L1, EX.L2$newMosaic)
+plot(cut)
+
+EX.L4<-fieldIndex(mosaic=cut,
+                  index = index)
+
+
+
+plot(EX.L4$BGI)
+```
+
+```{r}
+gli_fig = as.data.frame(EX.L4$NGRDI, xy=TRUE, na.rm =T) %>% 
+  ggplot(aes(x, y, fill = NGRDI))+
+  geom_tile()+
+  # scale_fill_distiller(palette = "Spectral", direction = 1)+
+  scale_fill_gradient2(low = "red", mid ="green", high = "green", midpoint = 0.2)+
+  # scale_fill_viridis_c(option = "B",direction = -1)+
+  theme_void()+
+  coord_fixed()
+```
+
+```{r}
+plot_grid(rgb_fig, gli_fig, axis = "b",
+          rel_widths = c(0.9,1),
+          labels = c("RGB", "NGRDI"),
+          scale = 0.90)
+# ggsave("figs/leaf_gli.png",dpi = 600, height = 3, width =10 )
+```
+
+```{r}
+
+df = as(EX.L4, "SpatialPixelsDataFrame")
+dff = as.data.frame(df) %>% 
+  gather(1:(3+length(index)), key = "index", value = "value" ) %>%
+  filter(!is.na(value),
+         !is.infinite(value)) %>% 
+  group_by(index) %>% 
+  summarise(mean = mean(value, na.rm = T),
+            std = sd(value),
+            Q25 = quantile(value,0.25),
+            Q50 = quantile(value,0.50),
+            Q75 = quantile(value,0.75)) %>% 
+  mutate(leaf = pics[30])
+```
+
+# Wheat leaf blast
+
+```{r eval=FALSE, include=TRUE}
+pics<-list.files("./pics/01-Wheat_leaf_blast")
+# length(pics)
+#indices
+index = c("BI","SCI","GLI","HI","SI","VARI","HUE","BGI","NGRDI")
+
+
+box = data.frame()
+
+for(i in 1:length(pics)){
+
+EX.L1<-stack(paste("./pics/01-Wheat_leaf_blast/",pics[i],sep = ""))
+EX.L1<-aggregate(EX.L1, fact=10)
+EX.L.Shape<-fieldPolygon(mosaic=EX.L1, extent=T, plot = F)
+
+EX1.Indices<- fieldIndex(mosaic = EX.L1,
+                         index = index, 
+                         myIndex = c("Green"), plot = F)
+
+EX.L2<-fieldMask(mosaic=EX.L1,  myIndex = c("Blue"), cropValue=180, cropAbove=T, plot = F)
+
+cut = mask(EX.L1, EX.L2$newMosaic)
+EX.L4<-fieldIndex(mosaic=cut,
+                  index =index,
+                  plot =F)
+
+
+df = as(EX.L4, "SpatialPixelsDataFrame")
+dff = as.data.frame(df) %>% 
+  mutate(gray = 0.299*Red+0.587*Green+0.114*Blue) %>% 
+  gather(c(1:(3+length(index)),15), key = "index", value = "value" ) %>%
+  filter(!is.na(value),
+         !is.infinite(value)) %>% 
+  group_by(index) %>% 
+  dplyr::summarise(mean = mean(value, na.rm = T),
+            std = sd(value),
+            Q25 = quantile(value,0.25),
+            Q50 = quantile(value,0.50),
+            Q75 = quantile(value,0.75)) %>% 
+  mutate(leaf = pics[i])
+
+
+box = box %>% 
+  bind_rows(dff)}
+length(unique(box$leaf))
+write.table(box,"data/indexes_WLB.txt")
+```
+
+```{r}
+box = read.table("data/indexes_WLB.txt")
+```
+
+# Load severity data
+
+```{r}
+# sev_data = gsheet2tbl("https://docs.google.com/spreadsheets/d/106sg_O8DeALZpWnxERQNgk8UKgsFbhobWwrl4JXOzbo/edit#gid=0")
+
+
+sev = gsheet2tbl("https://docs.google.com/spreadsheets/d/106sg_O8DeALZpWnxERQNgk8UKgsFbhobWwrl4JXOzbo/edit#gid=0")
+sev
+
+
+blast_data = gsheet2tbl("https://docs.google.com/spreadsheets/d/1KnJ9N8jqKPMjCt8jCLv7OqYL9hLyYeK8wkGEBmlGSVI/edit?usp=sharing") %>% 
+  dplyr::select(code, city, region, position_wheat, host,species)
+# blast_data
+
+sev_data = full_join(sev, blast_data, by = "code") %>% 
+  mutate(n = seq(1:1123)) %>% 
+  filter(n<201) %>% 
+  dplyr::select(-n) %>% 
+  
+  dplyr::select(pic_name, sev)
+# sev_data
+
+
+length(unique(sev$pic_name))
+```
+
+```{r}
+all_data = box %>%
+  separate(leaf, into = c("pic_name", "jpg"), sep = ".jpg") %>%
+  # separate(pic_name, into = c("hh", "isolate","repp"), sep = "_", remove = F) %>%
+  dplyr::select(-jpg) %>% 
+  full_join(sev_data) %>% 
+  # filter(sev>0) %>% 
+  mutate(sev = case_when(sev==0 ~0.01,
+                         sev >0 ~sev)) %>% 
+  filter(!is.na(index)) %>% 
+  mutate(sev = sev)
+length(unique(all_data$pic_name))
+# length(unique(box$leaf))
+```
+```{r}
+summary(sev$sev)
+```
+
+### Images
+
+```{r}
+hist_sev_WLB =  sev %>% 
+  ggplot(aes(sev))+
+  geom_histogram(color = "white", fill = "black", bins = 20)+
+  theme_minimal_hgrid(font_size = 10)+
+  labs(x = "Severity (%)",
+       y = "Frequency")+
+  scale_x_continuous(limits = c(-5,105), breaks = seq(0,100,25))+
+  # theme_void()+
+  # coord_fixed()+
+  theme(panel.background = element_rect(color = "black"),
+        axis.title.y = element_text(size=8))
+hist_sev_WLB
+
+
+```
+
+```{r}
+EX.L1<-stack(paste("./pics/01-Wheat_leaf_blast/","G_758_R2.jpg",sep = ""))
+EX.L1<-aggregate(EX.L1, fact=10)
+EX.L.Shape<-fieldPolygon(mosaic=EX.L1, extent=T, plot = F)
+
+EX1.Indices<- fieldIndex(mosaic = EX.L1,
+                         index = index, 
+                         myIndex = c("Green"), plot = F)
+
+EX.L2<-fieldMask(mosaic=EX.L1,  myIndex = c("Blue"), cropValue=180, cropAbove=T, plot = F)
+
+cut = mask(EX.L1, EX.L2$newMosaic)
+EX.L4<-fieldIndex(mosaic=cut,
+                  index =index,
+                  plot =F)
+# plot(EX.L4$NGRDI)
+
+```
+
+```{r}
+rgb_fig_wlb = RStoolbox::ggRGB(EX.L2$newMosaic,
+                 r = 1,
+                 g = 2,
+                 b = 3)+
+  theme_map()+
+  coord_fixed()+
+  theme(panel.background = element_rect(color = "white"))
+
+
+gli_fig_wlb = as.data.frame(EX.L4$VARI, xy=TRUE, na.rm =T) %>% 
+  ggplot(aes(x, y, fill = VARI))+
+  geom_tile()+
+  scale_fill_viridis_c(option = "B",direction = -1)+
+  theme_map()+
+  coord_fixed()+
+  theme(panel.background = element_rect(color = "white"),
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 8))
+```
+
+```{r}
+# plot_grid(rgb_fig, gli_fig, axis = "b",
+#           rel_widths = c(0.9,1),
+#           labels = c("RGB", "NGRDI"),
+#           scale = 0.90)
+
+rgb_fig_wlb + gli_fig_wlb + hist_sev_WLB
+
+# ggsave("figs/leaf_gli_wlb.png",dpi = 600, height = 4, width =12)
+```
+
+### Relationship sev indices
+
+```{r}
+rgb_gg = all_data %>% 
+  filter(index %in% c("Red", "Blue", "Green")) %>% 
+    ggplot(aes(mean, sev, color = index)) + 
+  # geom_text()+
+  geom_point(color = "gray", size  =3)+
+  geom_smooth(se = F, size = 2)+
+  facet_wrap(~index, scales = "free_x", nrow =1)+
+  scale_color_manual(values = c("steelblue","darkgreen", "darkred"))+
+  theme_minimal_hgrid()+
+  labs(x = "Mean value in the image",
+       y = "Disease severity (%)")+
+  theme(panel.border = element_rect(color = "gray"))+
+  theme(legend.position = "none")
+rgb_gg
+```
+
+```{r}
+index_gg = all_data %>% 
+  filter(!index %in% c("Red", "Blue", "Green")) %>% 
+    ggplot(aes(mean, sev)) + 
+  # geom_text()+
+  geom_point(color = "gray", size  =3)+
+  geom_smooth(color = "black", se = F, size = 2)+
+  facet_wrap(~index, scales = "free_x", nrow =2)+
+  theme_minimal_hgrid()+
+  labs(x = "Mean index value in the image",
+       y = "Disease severity (%)")+
+  theme(panel.border = element_rect(color = "gray"))
+index_gg
+```
+
+```{r}
+plot_grid(
+  plot_grid(NULL,rgb_gg,NULL, rel_widths =c(0.18,1,0.2), nrow = 1),
+          index_gg,
+          nrow = 2,
+          rel_heights = c(0.5,1))
+ggsave("figs/index_sev_WLB.png", dpi = 500, height = 8, width = 10)
+```
+
+```{r}
+cor_wlb = all_data %>% 
+  group_by(index) %>% 
+  dplyr::summarise(cor = round(  cor.test(mean,sev, method = "spearman")$estimate,3),
+                   P_value = cor.test(mean,sev, method = "spearman")$p.value) %>% 
+  arrange(-cor)
+cor_wlb
+```
+
+### Spread
+
+```{r}
+all_data_spread_wlb = all_data %>% 
+  # mutate(nn=1:length(all_data$pic_name)) %>% 
+  pivot_wider(id_col = c(pic_name,sev),
+              names_from = index, 
+              values_from =  mean)   
+all_data_spread_wlb
+```
+
+## GBM
+
+```{r}
+train=sample(x = 1:length(all_data_spread_wlb$sev), 
+             size = round(0.75*length(all_data_spread_wlb$sev),1))
+# length(train)
+gbm.fit = gbm(sev ~BGI+BI+GLI+HI+HUE+NGRDI+VARI+gray+ Red+Green+Blue  + SI + SCI,
+             data = all_data_spread_wlb[train,],
+             distribution = "gaussian",
+              n.trees = 1000,
+             interaction.depth = 3,
+             shrinkage = 0.1,
+             cv.folds = 5,
+             n.cores = NULL, # will use all cores by default
+             verbose = FALSE)
+print(gbm.fit)
+sqrt(min(gbm.fit$cv.error))
+```
+
+```{r}
+gbm.perf(gbm.fit, method = "cv")
+# find index for n trees with minimum CV error
+```
+
+```{r}
+min_MSE <- which.min(gbm.fit$cv.error)
+sqrt(gbm.fit$cv.error[min_MSE])
+
+```
+
+```{r}
+# best.iter <- gbm.perf(model1, method = "test")
+# print(best.iter)
+
+pred = predict(gbm.fit, newdata = all_data_spread_wlb[-train,-1], ntrees = 5000 )
+
+sqrt(mean(((pred)-all_data_spread_wlb$sev[-train])^2))
+CCC((pred), all_data_spread_wlb$sev[-train])$rho.c$est
+
+plot((pred), (pred)-all_data_spread_wlb$sev[-train])
+abline(a=0,b=0)
+```
+
+### Testing various hyperparameters
+
+Create hyperparameter grid
+
+```{r}
+
+hyper_grid <- expand.grid(
+  shrinkage = c(.001, .01, .1, .3),
+  interaction.depth = c(1, 3, 5, 6),
+  n.minobsinnode = c(5, 10, 15),
+  bag.fraction = c(.5,.65, .8, 1), 
+  optimal_trees = 0,               # a place to dump results
+  min_RMSE = 0,
+  CCC =0 # a place to dump results
+)
+# total number of combinations
+nrow(hyper_grid)
+```
+
+```{r}
+# randomize data
+set.seed(1234)
+train=sample(x = 1:length(all_data_spread_wlb$sev), 
+             size = round(0.80*length(all_data_spread_wlb$sev),1))
+
+# grid search 
+for(i in 1:nrow(hyper_grid)) {
+
+# reproducibility
+set.seed(123)
+
+
+ # train model
+gbm.tune <- gbm(
+  formula = (sev) ~BGI+BI+GLI+HI+HUE+NGRDI+VARI+gray +Red+Green+Blue + SI + SCI, #<<<<<
+  data = all_data_spread_wlb[train,],
+  distribution = "gaussian",
+  n.trees = 5000,
+  interaction.depth = hyper_grid$interaction.depth[i],
+  shrinkage = hyper_grid$shrinkage[i],
+  n.minobsinnode = hyper_grid$n.minobsinnode[i],
+  bag.fraction = hyper_grid$bag.fraction[i],
+  train.fraction = .75,
+  n.cores = NULL, # will use all cores by default
+  verbose = FALSE)
+
+pred = predict(gbm.tune, newdata = all_data_spread_wlb[-train,-1], ntrees = 5000 )
+ # add min training error and trees to grid
+  hyper_grid$optimal_trees[i] <- which.min(gbm.tune$valid.error)
+  hyper_grid$min_RMSE[i] <- sqrt(min(gbm.tune$valid.error))
+  hyper_grid$CCC[i] = CCC(pred, all_data_spread_wlb$sev[-train])$rho.c$est#<<<<<
+  
+}
+
+best_par = hyper_grid %>% 
+  dplyr::arrange(-CCC) %>%
+  head(10)
+best_par
+
+
+
+# gbm.tune$fit
+```
+
+### Best model
+
+```{r}
+# for reproducibility
+set.seed(123)
+
+# train GBM model
+gbm.fit.final_wlb <- gbm(
+  formula = (sev) ~BGI+BI+GLI+HI+HUE+NGRDI+VARI+Red+Green+Blue+gray+SI+SCI,
+  data = all_data_spread_wlb[train,],
+  distribution = "gaussian",
+  n.trees = best_par$optimal_trees[1],
+  interaction.depth = best_par$interaction.depth[1],
+  shrinkage = best_par$shrinkage[1],
+  n.minobsinnode = best_par$n.minobsinnode[1],
+  bag.fraction = best_par$bag.fraction[1], 
+  train.fraction =0.75,
+  n.cores = NULL, # will use all cores by default
+  verbose = FALSE
+  )
+
+
+```
+
+### Relative influence
+
+```{r}
+par(mar = c(5, 8, 1, 1))
+summary_gbm_wlb = summary(
+  gbm.fit.final_wlb, 
+  cBars = 15,
+  method = relative.influence, # also can use permutation.test.gbm
+  las = 2
+  )
+
+rel_wlb = summary_gbm_wlb %>% 
+  rownames_to_column("index") %>% 
+  ggplot(aes(rel.inf, reorder(var, rel.inf)))+
+  geom_col(aes(fill =rel.inf>1, color =rel.inf>1 ), width = 0.85)+
+  theme_minimal_vgrid()+
+  labs(x = "Relative influence (%)",
+       y = "Model predictors",
+       fill = "RI > 1%",
+       color = "RI > 1%")
+rel_wlb
+# ggsave("figs/var_influence.png",dpi = 600, height = 4, width = 6)
+```
+
+Partial dependence plots
+
+```{r}
+gbm.fit.final_wlb %>%
+  pdp::partial(pred.var = "NGRDI", n.trees = gbm.fit.final_wlb$n.trees, grid.resolution = 100) %>%
+  ggplot(aes( NGRDI,(yhat)))+
+  geom_line()
+```
+
+LIME
+
+```{r}
+model_type.gbm <- function(x, ...) {
+  return("regression")
+}
+
+predict_model.gbm <- function(x, newdata, ...) {
+  pred <- predict(x, newdata, n.trees = x$n.trees)
+  return(as.data.frame(pred))
+}
+```
+
+```{r}
+# get a few observations to perform local interpretation on
+local_obs <- (all_data_spread_wlb[-train,])[1:4, ]
+
+# apply LIME
+explainer <- lime(all_data_spread_wlb[train,], gbm.fit.final_wlb)
+explanation <- lime::explain(local_obs, explainer, n_features = 7, n.trees =1)
+plot_features(explanation)
+
+
+```
+
+## Prediction
+
+```{r}
+# predict values for test data
+pred <- predict(gbm.fit.final_wlb,
+                n.trees = gbm.fit.final_wlb$n.trees,
+                all_data_spread_wlb[-train,])
+
+# results
+caret::RMSE((pred), all_data_spread_wlb[-train,]$sev)
+CCC((pred), all_data_spread_wlb$sev[-train])$rho.c$est
+cor((pred), all_data_spread_wlb$sev[-train])^2
+
+```
+
+```{r}
+accuracy_wlb =data.frame(predi=pred, actual = all_data_spread_wlb$sev[-train]) %>% 
+  summarise(RMSE = caret::RMSE(pred, actual),
+            r = cor(pred, actual),
+            s.shift = CCC(pred, actual)$s.shift,
+            l.shift = CCC(pred, actual)$l.shift,
+            C.b = CCC(pred, actual)$C.b,
+            CCC = CCC(pred, actual)$rho.c$est,
+            CIS = paste(
+  round(CCC(pred, all_data_spread_wlb$sev[-train])$rho.c[2],2),","," ",
+  round(CCC(pred, all_data_spread_wlb$sev[-train])$rho.c[3],2),sep = ""
+  ))
+accuracy_wlb
+```
+
+#### plot
+```{r}
+
+# plot_grid(
+conc_wlb = data.frame(predict = pred, actual =all_data_spread_wlb$sev[-train]) %>% 
+ggplot(aes(actual,predict))+
+  geom_point(size =2, color = "gray")+
+  geom_abline(intercept = 0, slope= 1, size = .81, color = "black", linetype = "dashed")+
+  geom_smooth(method = "lm", 
+              color = "red",
+              size =.81, se =F,
+              fullrange=T)+
+  theme_minimal_grid()+
+  labs(x = "Predicted Severity (%)",
+       y = "Actual Severity (%)")+
+  coord_equal(xlim = c(0,100),
+              ylim = c(0,100))+
+  xlim(0,100)
+
+ggsave("figs/concordance.png", dpi = 600, height = 3.5, width = 4)
+
+```
+
+# Soybean Rust
+
+```{r eval=FALSE, include=TRUE}
+pics<-list.files("./pics/01-soybean-rust-bg-blue")
+# length(pics)
+#indices
+index = c("BI","SCI","GLI","HI","SI","VARI","HUE","BGI","NGRDI")
+
+
+box = data.frame()
+
+for(i in 1:length(pics)){
+
+EX.L1<-stack(paste("./pics/01-soybean-rust-bg-blue/",pics[i],sep = ""))
+EX.L1<-aggregate(EX.L1, fact=7)
+EX.L.Shape<-fieldPolygon(mosaic=EX.L1, extent=T, plot = F)
+
+EX1.Indices<- fieldIndex(mosaic = EX.L1,
+                         index = index, 
+                         myIndex = c("Green"), plot = F)
+
+EX.L2<-fieldMask(mosaic=EX.L1,  myIndex = c("Blue"), cropValue=100, cropAbove=T, plot = F)
+
+cut = mask(EX.L1, EX.L2$newMosaic)
+EX.L4<-fieldIndex(mosaic=cut,
+                  index =index,
+                  plot =F)
+
+
+df = as(EX.L4, "SpatialPixelsDataFrame")
+dff = as.data.frame(df) %>% 
+  mutate(gray = 0.299*Red+0.587*Green+0.114*Blue) %>% 
+  gather(c(1:(3+length(index)),15), key = "index", value = "value" ) %>%
+  filter(!is.na(value),
+         !is.infinite(value)) %>% 
+  group_by(index) %>% 
+  dplyr::summarise(mean = mean(value, na.rm = T),
+            std = sd(value),
+            Q25 = quantile(value,0.25),
+            Q50 = quantile(value,0.50),
+            Q75 = quantile(value,0.75)) %>% 
+  mutate(leaf = pics[i])
+
+
+box = box %>% 
+  bind_rows(dff)}
+length(unique(box$leaf))
+write.table(box,"data/indexes_SBR.txt")
+```
+
+```{r}
+box = read.table("data/indexes_SBR.txt")
+```
+
+### load SBR severity
+
+```{r}
+sbr_load = gsheet2tbl("https://docs.google.com/spreadsheets/d/13TVKBQgfCAr7UGie_LHTF_kwPHC1XI_AkLKoRYtjPrQ/edit?usp=sharing")
+```
+
+```{r}
+all_data_sbr = box %>% 
+  separate(leaf, into=c("file","format"), sep ="_") %>% 
+  dplyr::select(-format) %>% 
+  full_join(sbr_load) %>% 
+  na.omit()
+
+length(unique(all_data_sbr$file))
+
+
+head(all_data_sbr)
+```
+
+```{r}
+summary(all_data_sbr$sev)
+```
+
+
+### Images
+
+```{r}
+hist_sev_sbr =  all_data_sbr %>%
+  pivot_wider(id_col = c(file,sev),
+              names_from = index, 
+              values_from =  mean) %>%
+  ggplot(aes(sev))+
+  geom_histogram(color = "white", fill = "black", bins = 20)+
+  theme_minimal_hgrid(font_size = 10)+
+  labs(x = "Severity (%)",
+       y = "Frequency")+
+  scale_x_continuous(limits = c(-5,105), breaks = seq(0,100,25))+
+  # theme_void()+
+  # coord_fixed()+
+  theme(panel.background = element_rect(color = "black"),
+        axis.title.y = element_text(size=8))
+
+```
+
+```{r}
+EX.L1<-stack(paste("./pics/01-soybean-rust-bg-blue/","Ferrugem 2_Median.jpg",sep = ""))
+EX.L1<-aggregate(EX.L1, fact=7)
+EX.L.Shape<-fieldPolygon(mosaic=EX.L1, extent=T, plot = F)
+
+EX1.Indices<- fieldIndex(mosaic = EX.L1,
+                         index = index, 
+                         myIndex = c("Green"), plot = F)
+
+EX.L2<-fieldMask(mosaic=EX.L1,  myIndex = c("Blue"), cropValue=100, cropAbove=T, plot = F)
+
+cut = mask(EX.L1, EX.L2$newMosaic)
+EX.L4<-fieldIndex(mosaic=cut,
+                  index =index,
+                  plot =F)
+# plot(EX.L4$HUE)
+```
+
+```{r}
+rgb_fig_sbr = RStoolbox::ggRGB(EX.L2$newMosaic,
+                 r = 1,
+                 g = 2,
+                 b = 3)+
+  theme_map()+
+  coord_fixed()+
+  theme(panel.background = element_rect(color = "white"))
+
+
+gli_fig_sbr = as.data.frame(EX.L4$HUE, xy=TRUE, na.rm =T) %>% 
+  ggplot(aes(x, y, fill = HUE))+
+  geom_tile()+
+  scale_fill_viridis_c(option = "B",direction = -1)+
+  theme_map()+
+  coord_fixed()+
+  theme(panel.background = element_rect(color = "white"),
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 8))
+
+```
+
+```{r}
+rgb_fig_sbr + gli_fig_sbr + hist_sev_sbr #+
+  # rgb_fig_wlb + gli_fig_wlb + hist_sev_WLB+
+  #  plot_layout(widths = c(1, 1, 1),
+  #              heights = c(1,1))
+
+# ggsave("figs/leaf_gli.png",dpi = 600, height = 6, width =10)
+```
+
+### Relationship sev indices
+
+```{r}
+rgb_gg_sbr = all_data_sbr %>% 
+  filter(index %in% c("Red", "Blue", "Green")) %>% 
+    ggplot(aes(mean, sev, color = index)) + 
+  # geom_text()+
+  geom_point(color = "gray", size  =3)+
+  geom_smooth(se = F, size = 2)+
+  facet_wrap(~index, scales = "free_x", nrow =1)+
+  scale_color_manual(values = c("steelblue","darkgreen", "darkred"))+
+  theme_minimal_hgrid()+
+  labs(x = "Mean value in the image",
+       y = "Disease severity (%)")+
+  theme(panel.border = element_rect(color = "gray"))+
+  theme(legend.position = "none")
+rgb_gg_sbr
+```
+
+```{r}
+index_gg_sbr = all_data_sbr %>% 
+  filter(!index %in% c("Red", "Blue", "Green")) %>% 
+    ggplot(aes(mean, sev)) + 
+  # geom_text()+
+  geom_point(color = "gray", size  =3)+
+  geom_smooth(color = "black", se = F, size = 2)+
+  facet_wrap(~index, scales = "free_x", nrow =2)+
+  theme_minimal_hgrid()+
+  labs(x = "Mean index value in the image",
+       y = "Disease severity (%)")+
+  theme(panel.border = element_rect(color = "gray"))
+index_gg_sbr
+```
+
+```{r}
+plot_grid(
+  plot_grid(NULL,rgb_gg_sbr,NULL, rel_widths =c(0.18,1,0.2), nrow = 1),
+          index_gg_sbr,
+          nrow = 2,
+          rel_heights = c(0.5,1))
+ggsave("figs/index_sev_SBR.png", dpi = 500, height = 8, width = 10)
+```
+
+```{r}
+cor_sbr = all_data_sbr %>% 
+  group_by(index) %>% 
+  dplyr::summarise(cor = round(  cor.test(mean,sev, method = "spearman")$estimate,3),
+                   P_value = cor.test(mean,sev, method = "spearman")$p.value) %>% 
+  arrange(-cor)
+cor_sbr
+```
+
+### Spread df
+
+```{r}
+all_data_spread_sbr = all_data_sbr %>% 
+  pivot_wider(id_col = c(file,sev),
+              names_from = index, 
+              values_from =  mean)   
+
+all_data_spread_sbr
+```
+
+## GBM
+
+```{r}
+train=sample(x = 1:length(all_data_spread_sbr$sev), 
+             size = round(0.75*length(all_data_spread_sbr$sev),1))
+# length(train)
+gbm.fit = gbm(sev ~BGI+BI+GLI+HI+HUE+NGRDI+VARI+gray+ Red+Green+Blue  + SI + SCI,
+             data = all_data_spread_sbr[train,],
+             distribution = "gaussian",
+              n.trees = 1000,
+             interaction.depth = 3,
+             shrinkage = 0.1,
+             cv.folds = 5,
+             n.cores = NULL, # will use all cores by default
+             verbose = FALSE)
+print(gbm.fit)
+sqrt(min(gbm.fit$cv.error))
+```
+
+```{r}
+gbm.perf(gbm.fit, method = "cv")
+# find index for n trees with minimum CV error
+```
+
+```{r}
+min_MSE <- which.min(gbm.fit$cv.error)
+sqrt(gbm.fit$cv.error[min_MSE])
+
+```
+
+```{r}
+# best.iter <- gbm.perf(model1, method = "test")
+# print(best.iter)
+
+pred = predict(gbm.fit, newdata = all_data_spread_sbr[-train,-1], ntrees = 5000 )
+
+sqrt(mean(((pred)-all_data_spread_sbr$sev[-train])^2))
+CCC((pred), all_data_spread_sbr$sev[-train])$rho.c$est
+
+plot((pred), (pred)-all_data_spread_sbr$sev[-train])
+abline(a=0,b=0)
+```
+
+### Testing various hyperparameters
+
+Create hyperparameter grid
+
+```{r}
+
+hyper_grid <- expand.grid(
+  shrinkage = c(.001, .01, .1, .3),
+  interaction.depth = c(1, 3, 5, 6),
+  n.minobsinnode = c(5, 10, 15),
+  bag.fraction = c(.5,.65, .8, 1), 
+  optimal_trees = 0,               # a place to dump results
+  min_RMSE = 0,
+  CCC =0 # a place to dump results
+)
+# total number of combinations
+nrow(hyper_grid)
+```
+
+```{r}
+# randomize data
+set.seed(123)
+train=sample(x = 1:length(all_data_spread_sbr$sev), 
+             size = round(0.8*length(all_data_spread_sbr$sev),1))
+
+# grid search 
+for(i in 1:nrow(hyper_grid)) {
+
+# reproducibility
+set.seed(123)
+
+
+ # train model
+gbm.tune <- gbm(
+  formula = (sev) ~BGI+BI+GLI+HI+HUE+NGRDI+VARI+gray +Red+Green+Blue + SI + SCI, #<<<<<
+  data = all_data_spread_sbr[train,],
+  distribution = "gaussian",
+  n.trees = 5000,
+  interaction.depth = hyper_grid$interaction.depth[i],
+  shrinkage = hyper_grid$shrinkage[i],
+  n.minobsinnode = hyper_grid$n.minobsinnode[i],
+  bag.fraction = hyper_grid$bag.fraction[i],
+  train.fraction = .75,
+  n.cores = NULL, # will use all cores by default
+  verbose = FALSE)
+
+pred = predict(gbm.tune, newdata = all_data_spread_sbr[-train,-1], ntrees = 5000 )
+ # add min training error and trees to grid
+  hyper_grid$optimal_trees[i] <- which.min(gbm.tune$valid.error)
+  hyper_grid$min_RMSE[i] <- sqrt(min(gbm.tune$valid.error))
+  hyper_grid$CCC[i] = CCC(pred, all_data_spread_sbr$sev[-train])$rho.c$est#<<<<<
+  
+}
+
+best_par = hyper_grid %>% 
+  dplyr::arrange(-CCC) %>%
+  head(10)
+best_par
+
+
+
+# gbm.tune$fit
+```
+
+### Best model
+
+```{r}
+# for reproducibility
+set.seed(123)
+
+# train GBM model
+gbm.fit.final_sbr <- gbm(
+  formula = (sev) ~BGI+BI+GLI+HI+HUE+NGRDI+VARI+Red+Green+Blue+gray+SI+SCI,
+  data = all_data_spread_sbr[train,],
+  distribution = "gaussian",
+  n.trees = best_par$optimal_trees[1],
+  interaction.depth = best_par$interaction.depth[1],
+  shrinkage = best_par$shrinkage[1],
+  n.minobsinnode = best_par$n.minobsinnode[1],
+  bag.fraction = best_par$bag.fraction[1], 
+  train.fraction =0.75,
+  n.cores = NULL, # will use all cores by default
+  verbose = FALSE
+  )
+
+
+```
+
+### Relative influence
+
+```{r}
+par(mar = c(5, 8, 1, 1))
+summary_gbm_sbr = summary(
+  gbm.fit.final_sbr, 
+  cBars = 15,
+  method = relative.influence, # also can use permutation.test.gbm
+  las = 2
+  )
+
+rel_sbr = summary_gbm_sbr %>% 
+  rownames_to_column("index") %>% 
+  ggplot(aes(rel.inf, reorder(var, rel.inf)))+
+  geom_col(aes(fill =rel.inf>1, color =rel.inf>1 ), width = 0.85)+
+  theme_minimal_vgrid()+
+  labs(x = "Relative influence (%)",
+       y = "Model predictors",
+       fill = "RI > 1%",
+       color = "RI > 1%")
+rel_sbr
+# ggsave("figs/var_influence.png",dpi = 600, height = 4, width = 6)
+```
+
+Partial dependence plots
+
+```{r}
+gbm.fit.final_sbr %>%
+  pdp::partial(pred.var = "HUE", n.trees = gbm.fit.final_sbr$n.trees, grid.resolution = 100) %>%
+  ggplot(aes( HUE,(yhat)))+
+  geom_line()
+```
+
+LIME
+
+```{r}
+library(lime)
+```
+
+```{r}
+model_type.gbm <- function(x, ...) {
+  return("regression")
+}
+
+predict_model.gbm <- function(x, newdata, ...) {
+  pred <- predict(x, newdata, n.trees = x$n.trees)
+  return(as.data.frame(pred))
+}
+```
+
+```{r}
+# get a few observations to perform local interpretation on
+local_obs <- (all_data_spread_sbr[-train,])[1:4, ]
+
+# apply LIME
+explainer <- lime(all_data_spread_sbr[train,], gbm.fit.final_sbr)
+explanation <- lime::explain(local_obs, explainer, n_features = 7, n.trees =1)
+plot_features(explanation)
+
+
+```
+
+## Prediction
+
+```{r}
+# predict values for test data
+pred <- predict(gbm.fit.final_sbr,
+                n.trees = gbm.fit.final_sbr$n.trees,
+                all_data_spread_sbr[-train,])
+
+# results
+caret::RMSE((pred), all_data_spread_sbr[-train,]$sev)
+CCC(pred, all_data_spread_sbr$sev[-train])$rho.c$est
+cor(pred, all_data_spread_sbr$sev[-train])^2
+
+```
+
+```{r}
+accuracy_sbr =data.frame(predi=pred, actual = all_data_spread_sbr$sev[-train]) %>% 
+  summarise(RMSE = caret::RMSE(pred, actual),
+            r = cor(pred, actual),
+            s.shift = CCC(pred, actual)$s.shift,
+            l.shift = CCC(pred, actual)$l.shift,
+            C.b = CCC(pred, actual)$C.b,
+            CCC = CCC(pred, actual)$rho.c$est,
+            CIS = paste(
+  round(CCC(pred, all_data_spread_sbr$sev[-train])$rho.c[2],2),","," ",
+  round(CCC(pred, all_data_spread_sbr$sev[-train])$rho.c[3],2),sep = ""
+  ))
+accuracy_sbr
+```
+
+
+#### plot
+```{r}
+
+conc_sbr = data.frame(predict = pred, actual =all_data_spread_sbr$sev[-train]) %>% 
+ggplot(aes(actual, predict ))+
+  geom_point(size =2, color = "gray")+
+  geom_abline(intercept = 0, slope= 1, size = .81, color = "black", linetype = "dashed")+
+  geom_smooth(method = "lm", 
+              color = "red",
+              size =.81, se =F,
+              fullrange=T)+
+  theme_minimal_grid()+
+  labs(x = "Predicted Severity (%)",
+       y = "Actual Severity (%)")+
+  coord_equal(xlim = c(0,100),
+              ylim = c(0,100))+
+  xlim(0,100)
+
+
+ggsave("figs/concordance.png", dpi = 600, height = 3.5, width = 4)
+
+```
+
+# Xylella
+
+```{r eval=FALSE, include=TRUE}
+pics<-list.files("./pics/01-Xylella-tobacco-bg-white")
+# length(pics)
+#indices
+index = c("BI","SCI","GLI","HI","SI","VARI","HUE","BGI","NGRDI")
+
+
+box = data.frame()
+
+for(i in 1:length(pics)){
+
+EX.L1<-stack(paste("./pics/01-Xylella-tobacco-bg-white/",pics[i],sep = ""))
+EX.L1<-aggregate(EX.L1, fact=7)
+EX.L.Shape<-fieldPolygon(mosaic=EX.L1, extent=T, plot = F)
+
+EX1.Indices<- fieldIndex(mosaic = EX.L1,
+                         index = index, 
+                         myIndex = c("Green"), plot = F)
+
+EX.L2<-fieldMask(mosaic=EX.L1,  myIndex = c("Blue"), cropValue=200, cropAbove=T, plot = F)
+
+cut = mask(EX.L1, EX.L2$newMosaic)
+EX.L4<-fieldIndex(mosaic=cut,
+                  index =index,
+                  plot =F)
+
+
+df = as(EX.L4, "SpatialPixelsDataFrame")
+dff = as.data.frame(df) %>% 
+  mutate(gray = 0.299*Red+0.587*Green+0.114*Blue) %>% 
+  gather(c(1:(3+length(index)),15), key = "index", value = "value" ) %>%
+  filter(!is.na(value),
+         !is.infinite(value)) %>% 
+  group_by(index) %>% 
+  dplyr::summarise(mean = mean(value, na.rm = T),
+            std = sd(value),
+            Q25 = quantile(value,0.25),
+            Q50 = quantile(value,0.50),
+            Q75 = quantile(value,0.75)) %>% 
+  mutate(leaf = pics[i])
+
+
+box = box %>% 
+  bind_rows(dff)}
+length(unique(box$leaf))
+write.table(box,"data/indexes_Xylella.txt")
+```
+
+```{r}
+box = read.table("data/indexes_Xylella.txt")
+```
+
+```{r}
+data_xy_load = read_csv("data_pics/01-Xylella-tobacco-severity.csv") %>% 
+  mutate(file = as.character(File)) %>% 
+  dplyr::select(-File)
+```
+
+```{r}
+data_xy = box %>% 
+  separate(leaf, into=c("file","format"), sep =".jpg") %>% 
+  dplyr::select(-format) %>% 
+  full_join(data_xy_load, by="file") %>% 
+  mutate(sev=ImageJ)
+data_xy
+
+# length(unique(data_xy$sev))
+```
+
+```{r}
+summary(data_xy$sev)
+```
+
+
+### Images
+
+```{r}
+hist_sev_xy =  data_xy %>% 
+  pivot_wider(id_col = c(file,sev),
+              names_from = index, 
+              values_from =  mean) %>%
+  ggplot(aes(sev))+
+  geom_histogram(color = "white", fill = "black", bins = 20)+
+  theme_minimal_hgrid(font_size = 10)+
+  labs(x = "Severity (%)",
+       y = "Frequency")+
+  scale_x_continuous(limits = c(-5,105), breaks = seq(0,100,25))+
+  # theme_void()+
+  # coord_fixed()+
+  theme(panel.background = element_rect(color = "black"))
+
+```
+
+```{r}
+EX.L1<-stack(paste("./pics/01-Xylella-tobacco-bg-white/","75.jpg",sep = ""))
+EX.L1<-aggregate(EX.L1, fact=7)
+EX.L.Shape<-fieldPolygon(mosaic=EX.L1, extent=T, plot = F)
+
+EX1.Indices<- fieldIndex(mosaic = EX.L1,
+                         index = index, 
+                         myIndex = c("Green"), plot = F)
+
+EX.L2<-fieldMask(mosaic=EX.L1,  myIndex = c("Blue"), cropValue=200, cropAbove=T, plot = F)
+
+cut = mask(EX.L1, EX.L2$newMosaic)
+EX.L4<-fieldIndex(mosaic=cut,
+                  index =index,
+                  plot =F)
+# plot(EX.L4$HUE)
+```
+
+```{r}
+rgb_fig_xy = RStoolbox::ggRGB(EX.L2$newMosaic,
+                 r = 1,
+                 g = 2,
+                 b = 3)+
+  theme_map()+
+  coord_fixed()+
+  theme(panel.background = element_rect(color = "white"))
+
+
+gli_fig_xy = as.data.frame(EX.L4$HUE, xy=TRUE, na.rm =T) %>% 
+  ggplot(aes(x, y, fill = HUE))+
+  geom_tile()+
+  scale_fill_viridis_c(option = "B",direction = -1)+
+  theme_map()+
+  coord_fixed()+
+  theme(panel.background = element_rect(color = "white"),
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 8))
+
+# rgb_fig_xy+ gli_fig_xy
+```
+
+```{r}
+# rgb_fig_sbr + gli_fig_sbr + hist_sev_sbr #+
+#   rgb_fig_wlb + gli_fig_wlb + hist_sev_WLB+
+  rgb_fig_xy + gli_fig_xy +hist_sev_xy
+#    plot_layout(widths = c(1, 1, 1),
+#                heights = c(1,1,1))
+# 
+# ggsave("figs/leaf_gli.png",dpi = 600, height = 7, width =8)
+```
+
+### Relationship sev indices
+
+```{r}
+rgb_gg_xy = data_xy %>% 
+  filter(index %in% c("Red", "Blue", "Green")) %>% 
+    ggplot(aes(mean, sev, color = index)) + 
+  # geom_text()+
+  geom_point(color = "gray", size  =3)+
+  geom_smooth(se = F, size = 2)+
+  facet_wrap(~index, scales = "free_x", nrow =1)+
+  scale_color_manual(values = c("steelblue","darkgreen", "darkred"))+
+  theme_minimal_hgrid()+
+  labs(x = "Mean value in the image",
+       y = "Disease severity (%)")+
+  theme(panel.border = element_rect(color = "gray"))+
+  theme(legend.position = "none")
+rgb_gg_xy
+```
+
+```{r}
+index_gg_xy = data_xy %>% 
+  filter(!index %in% c("Red", "Blue", "Green")) %>% 
+    ggplot(aes(mean, sev)) + 
+  # geom_text()+
+  geom_point(color = "gray", size  =3)+
+  geom_smooth(color = "black", se = F, size = 2)+
+  facet_wrap(~index, scales = "free_x", nrow =2)+
+  theme_minimal_hgrid()+
+  labs(x = "Mean index value in the image",
+       y = "Disease severity (%)")+
+  theme(panel.border = element_rect(color = "gray"))
+index_gg_xy
+```
+
+```{r}
+plot_grid(
+  plot_grid(NULL,rgb_gg_xy,NULL, rel_widths =c(0.18,1,0.2), nrow = 1),
+          index_gg_xy,
+          nrow = 2,
+          rel_heights = c(0.5,1))
+ggsave("figs/index_sev_XY.png", dpi = 500, height = 8, width = 10)
+```
+
+```{r}
+cor_xy = data_xy %>% 
+  group_by(index) %>% 
+  dplyr::summarise(cor = round(  cor.test(mean,sev, method = "spearman")$estimate,3),
+                   P_value = round(cor.test(mean,sev, method = "spearman")$p.value,4)) %>% 
+  arrange(-cor)
+cor_xy
+```
+
+### Spread df
+
+```{r}
+all_data_spread_xy = data_xy %>% 
+  pivot_wider(id_col = c(file,sev),
+              names_from = index, 
+              values_from =  mean)   
+
+all_data_spread_xy
+```
+
+## GBM
+
+```{r}
+train=sample(x = 1:length(all_data_spread_xy$sev), 
+             size = round(0.75*length(all_data_spread_xy$sev),1))
+# length(train)
+gbm.fit = gbm(sev ~BGI+BI+GLI+HI+HUE+NGRDI+VARI+gray+ Red+Green+Blue  + SI + SCI,
+             data = all_data_spread_xy[train,],
+             distribution = "gaussian",
+              n.trees = 1000,
+             interaction.depth = 3,
+             shrinkage = 0.1,
+             cv.folds = 5,
+             n.cores = NULL, # will use all cores by default
+             verbose = FALSE)
+print(gbm.fit)
+sqrt(min(gbm.fit$cv.error))
+```
+
+```{r}
+gbm.perf(gbm.fit, method = "cv")
+# find index for n trees with minimum CV error
+```
+
+```{r}
+min_MSE <- which.min(gbm.fit$cv.error)
+sqrt(gbm.fit$cv.error[min_MSE])
+
+```
+
+```{r}
+# best.iter <- gbm.perf(model1, method = "test")
+# print(best.iter)
+
+pred = predict(gbm.fit, newdata = all_data_spread_xy[-train,-1], ntrees = 5000 )
+
+sqrt(mean(((pred)-all_data_spread_xy$sev[-train])^2))
+CCC((pred), all_data_spread_xy$sev[-train])$rho.c$est
+
+plot((pred), (pred)-all_data_spread_xy$sev[-train])
+abline(a=0,b=0)
+```
+
+### Testing various hyperparameters
+
+Create hyperparameter grid
+
+```{r}
+
+hyper_grid <- expand.grid(
+  shrinkage = c(.001, .01, .1, .3),
+  interaction.depth = c(1, 3, 5, 6),
+  n.minobsinnode = c(5, 10, 15),
+  bag.fraction = c(.5,.65, .8, 1), 
+  optimal_trees = 0,               # a place to dump results
+  min_RMSE = 0,
+  CCC =0 # a place to dump results
+)
+# total number of combinations
+nrow(hyper_grid)
+```
+
+```{r}
+# randomize data
+set.seed(123)
+train=sample(x = 1:length(all_data_spread_xy$sev), 
+             size = round(0.80*length(all_data_spread_xy$sev),1))
+
+# grid search 
+for(i in 1:nrow(hyper_grid)) {
+
+# reproducibility
+set.seed(123)
+
+
+ # train model
+gbm.tune <- gbm(
+  formula = (sev) ~BGI+BI+GLI+HI+HUE+NGRDI+VARI+gray +Red+Green+Blue + SI + SCI, #<<<<<
+  data = all_data_spread_xy[train,],
+  distribution = "gaussian",
+  n.trees = 5000,
+  interaction.depth = hyper_grid$interaction.depth[i],
+  shrinkage = hyper_grid$shrinkage[i],
+  n.minobsinnode = hyper_grid$n.minobsinnode[i],
+  bag.fraction = hyper_grid$bag.fraction[i],
+  train.fraction = .75,
+  n.cores = NULL, # will use all cores by default
+  verbose = FALSE)
+
+pred = predict(gbm.tune, newdata = all_data_spread_xy[-train,-1], ntrees = 5000 )
+ # add min training error and trees to grid
+  hyper_grid$optimal_trees[i] <- which.min(gbm.tune$valid.error)
+  hyper_grid$min_RMSE[i] <- sqrt(min(gbm.tune$valid.error))
+  hyper_grid$CCC[i] = CCC(pred, all_data_spread_xy$sev[-train])$rho.c$est#<<<<<
+  
+}
+
+best_par = hyper_grid %>% 
+  dplyr::arrange(-CCC) %>%
+  head(10)
+best_par
+
+
+
+# gbm.tune$fit
+```
+
+### Best model
+
+```{r}
+# for reproducibility
+set.seed(123)
+
+# train GBM model
+gbm.fit.final_xy <- gbm(
+  formula = (sev) ~BGI+BI+GLI+HI+HUE+NGRDI+VARI+Red+Green+Blue+gray+SI+SCI,
+  data = all_data_spread_xy[train,],
+  distribution = "gaussian",
+  n.trees = best_par$optimal_trees[1],
+  interaction.depth = best_par$interaction.depth[1],
+  shrinkage = best_par$shrinkage[1],
+  n.minobsinnode = best_par$n.minobsinnode[1],
+  bag.fraction = best_par$bag.fraction[1], 
+  train.fraction =0.75,
+  n.cores = NULL, # will use all cores by default
+  verbose = FALSE
+  )
+
+
+```
+
+### Relative influence
+
+```{r}
+par(mar = c(5, 8, 1, 1))
+summary_gbm_xy = summary(
+  gbm.fit.final_xy, 
+  cBars = 15,
+  method = relative.influence, # also can use permutation.test.gbm
+  las = 2
+  )
+
+rel_xy = summary_gbm_xy %>% 
+  rownames_to_column("index") %>% 
+  ggplot(aes(rel.inf, reorder(var, rel.inf)))+
+  geom_col(aes(fill =rel.inf>1, color =rel.inf>1 ), width = 0.85)+
+  theme_minimal_vgrid()+
+  labs(x = "Relative influence (%)",
+       y = "Model predictors",
+       fill = "RI > 1%",
+       color = "RI > 1%")
+rel_xy
+# ggsave("figs/var_influence.png",dpi = 600, height = 4, width = 6)
+```
+
+Partial dependence plots
+
+```{r}
+gbm.fit.final_xy %>%
+  pdp::partial(pred.var = "HUE", n.trees = gbm.fit.final_xy$n.trees, grid.resolution = 100) %>%
+  ggplot(aes( HUE,(yhat)))+
+  geom_line()
+```
+
+LIME
+
+```{r}
+library(lime)
+```
+
+```{r}
+model_type.gbm <- function(x, ...) {
+  return("regression")
+}
+
+predict_model.gbm <- function(x, newdata, ...) {
+  pred <- predict(x, newdata, n.trees = x$n.trees)
+  return(as.data.frame(pred))
+}
+```
+
+```{r}
+# get a few observations to perform local interpretation on
+local_obs <- (all_data_spread_xy[-train,])[1:4, ]
+
+# apply LIME
+explainer <- lime(all_data_spread_xy[train,], gbm.fit.final_xy)
+explanation <- lime::explain(local_obs, explainer, n_features = 7, n.trees =1)
+plot_features(explanation)
+
+
+```
+
+## Prediction
+
+```{r}
+# predict values for test data
+pred <- predict(gbm.fit.final_xy,
+                n.trees = gbm.fit.final_xy$n.trees,
+                all_data_spread_xy[-train,])
+
+# results
+caret::RMSE((pred), all_data_spread_xy[-train,]$sev)
+CCC((pred), all_data_spread_xy$sev[-train])$rho.c$est
+cor((pred), all_data_spread_xy$sev[-train])^2
+
+```
+
+```{r}
+accuracy_xy =data.frame(predi=pred, actual = all_data_spread_xy$sev[-train]) %>% 
+  summarise(RMSE = caret::RMSE(pred, actual),
+            r = cor(pred, actual),
+            s.shift = CCC(pred, actual)$s.shift,
+            l.shift = CCC(pred, actual)$l.shift,
+            C.b = CCC(pred, actual)$C.b,
+            CCC = CCC(pred, actual)$rho.c$est,
+            CIS = paste(
+  round(CCC(pred, all_data_spread_xy$sev[-train])$rho.c[2],2),","," ",
+  round(CCC(pred, all_data_spread_xy$sev[-train])$rho.c[3],2),sep = ""
+  ))
+accuracy_xy
+```
+
+
+#### plot
+```{r}
+
+conc_xy = data.frame(predict = pred, actual =all_data_spread_xy$sev[-train]) %>% 
+ggplot(aes(actual,predict))+
+  geom_point(size =2, color = "gray")+
+  geom_abline(intercept = 0, slope= 1, size = .81, color = "black", linetype = "dashed")+
+  geom_smooth(method = "lm", 
+              color = "red",
+              size =.81, se =F,
+              fullrange=T)+
+  theme_minimal_grid()+
+  labs(x = "Predicted Severity (%)",
+       y = "Actual Severity (%)")+
+  coord_equal(xlim = c(0,100),
+              ylim = c(0,100))+
+  xlim(0,100)
+
+
+ggsave("figs/concordance.png", dpi = 600, height = 3.5, width = 4)
+
+```
+
+# Late blight
+
+```{r eval=FALSE, include=TRUE}
+pics<-list.files("./pics/01 - PLB")
+# length(pics)
+#indices
+index = c("BI","SCI","GLI","HI","SI","VARI","HUE","BGI","NGRDI")
+
+
+box = data.frame()
+
+for(i in 1:length(pics)){
+
+EX.L1<-stack(paste("./pics/01 - PLB/",pics[i],sep = ""))
+EX.L1<-aggregate(EX.L1, fact=4)
+EX.L.Shape<-fieldPolygon(mosaic=EX.L1, extent=T, plot = F)
+
+# EX1.Indices<- fieldIndex(mosaic = EX.L1,
+#                          index = c("NGRDI","BGI","GLI", "SCI","HI", "SI"), 
+#                          myIndex = c("(Red-Blue)/Green"), plot = F)
+
+EX.L2<-fieldMask(mosaic=EX.L1, myIndex ="Red", cropValue=1, cropAbove=F, plot = F)
+
+cut = mask(EX.L1, EX.L2$mask)
+EX.L4<-fieldIndex(mosaic=cut,
+                  index =index,
+                  plot =F)
+
+
+df = as(EX.L4, "SpatialPixelsDataFrame")
+dff = as.data.frame(df) %>% 
+  mutate(gray = 0.299*Red+0.587*Green+0.114*Blue) %>% 
+  gather(c(1:(3+length(index)),15), key = "index", value = "value" ) %>%
+  filter(!is.na(value),
+         !is.infinite(value)) %>% 
+  group_by(index) %>% 
+  dplyr::summarise(mean = mean(value, na.rm = T),
+            std = sd(value),
+            Q25 = quantile(value,0.25),
+            Q50 = quantile(value,0.50),
+            Q75 = quantile(value,0.75)) %>% 
+  mutate(leaf = pics[i])
+
+
+box = box %>% 
+  bind_rows(dff)}
+length(unique(box$leaf))
+write.table(box,"data/indexes_PLB.txt")
+```
+
+```{r}
+box = read.table("data/indexes_PLB.txt")
+```
+
+## Load severity data
+
+```{r}
+library(gsheet)
+
+
+sev_data_plb2 = gsheet2tbl("https://docs.google.com/spreadsheets/d/1cnxGPXBYVR9lq0InKhhMMjr-cQ21vCf3q6iw8VEi6pY/edit#gid=445074476") %>% 
+  unite("file",1:2, sep = ".")
+
+
+
+length(unique(sev_data_plb2$file))
+```
+
+```{r}
+#new evaluation
+all_data_PI = box %>% 
+  mutate(file = leaf) %>% 
+  dplyr::select(-leaf) %>% 
+  # separate(file, into = c("file", "format"), sep = ".") %>% 
+  # dplyr::select(-format) %>%
+  right_join(sev_data_plb2)
+```
+
+```{r}
+# all_data_PI = box %>% 
+#   mutate(file = leaf) %>% 
+#   dplyr::select(-leaf) %>% 
+#   right_join(sev_data) #%>% 
+#   # filter(sev>0) %>% 
+#   # mutate(sev = case_when(sev==0 ~0.001,
+#   #                        sev >0 ~sev))
+```
+
+```{r}
+summary(all_data_PI$sev)
+```
+
+### Images
+
+```{r}
+hist_sev_pi =  all_data_PI %>% 
+  pivot_wider(id_col = c(file,sev),
+              names_from = index, 
+              values_from =  mean) %>% 
+  ggplot(aes(sev))+
+  geom_histogram(color = "white", fill = "black", bins =20)+
+  theme_minimal_hgrid(font_size = 10)+
+  labs(x = "Severity (%)",
+       y = "Frequency")+
+  scale_x_continuous(limits = c(-5,105), breaks = seq(0,100,25))+
+  # theme_void()+
+  # coord_fixed()+
+  theme(panel.background = element_rect(color = "black"),
+        axis.title.y = element_text(size=8))
+
+```
+
+```{r}
+EX.L1<-stack(paste("./pics/01-potato_late_bligh/","PI21_2D.png",sep = ""))
+EX.L1<-aggregate(EX.L1, fact=10)
+EX.L.Shape<-fieldPolygon(mosaic=EX.L1, extent=T, plot = F)
+
+EX1.Indices<- fieldIndex(mosaic = EX.L1,
+                         index = index, 
+                         myIndex = c("Green"), plot = F)
+
+EX.L2<-fieldMask(mosaic=EX.L1,  myIndex = c("Red"), cropValue=1, cropAbove=F, plot = F)
+
+cut = mask(EX.L1, EX.L2$newMosaic)
+EX.L4<-fieldIndex(mosaic=cut,
+                  index =index,
+                  plot = F)
+# plot(EX.L4$HUE)
+```
+
+```{r}
+rgb_fig_pi = RStoolbox::ggRGB(EX.L2$newMosaic,
+                 r = 1,
+                 g = 2,
+                 b = 3)+
+  theme_map()+
+  coord_fixed()+
+  xlim(250,1500)+
+  ylim(50,1300)+
+  theme(panel.background = element_rect(color = "white"))
+
+
+gli_fig_pi = as.data.frame(EX.L4$BGI, xy=TRUE, na.rm =T) %>% 
+  ggplot(aes(x, y, fill = BGI))+
+  geom_tile()+
+  scale_fill_viridis_c(option = "B",direction = -1)+
+  theme_map()+
+  coord_fixed()+
+  xlim(250,1500)+
+  ylim(50,1300)+
+  theme(panel.background = element_rect(color = "white"),
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 8))
+
+# rgb_fig_pi + gli_fig_pi
+
+```
+
+```{r}
+# rgb_fig_sbr + gli_fig_sbr + hist_sev_sbr #+
+#   rgb_fig_wlb + gli_fig_wlb + hist_sev_WLB+
+#   rgb_fig_xy + gli_fig_xy +hist_sev_xy+
+  rgb_fig_pi + gli_fig_pi +hist_sev_pi
+#    plot_layout(widths = c(1, 1, 1),
+#                heights = c(1,1,1,1))+
+#   plot_annotation(tag_levels = 'A')
+
+# ggsave("figs/leaf_gli.png",dpi = 600, height = 8, width =8)
+```
+
+### Relationship sev indices
+
+```{r}
+rgb_gg_pi = all_data_PI %>% 
+  filter(index %in% c("Red", "Blue", "Green")) %>% 
+    ggplot(aes(mean, sev, color = index)) + 
+  # geom_text()+
+  geom_point(color = "gray", size  =3)+
+  geom_smooth(se = F, size = 2)+
+  facet_wrap(~index, scales = "free_x", nrow =1)+
+  scale_color_manual(values = c("steelblue","darkgreen", "darkred"))+
+  theme_minimal_hgrid()+
+  labs(x = "Mean value in the image",
+       y = "Disease severity (%)")+
+  theme(panel.border = element_rect(color = "gray"))+
+  theme(legend.position = "none")
+rgb_gg_pi
+```
+
+```{r}
+index_gg_pi = all_data_PI %>% 
+  filter(!index %in% c("Red", "Blue", "Green")) %>% 
+    ggplot(aes(mean, sev)) + 
+  # geom_text()+
+  geom_point(color = "gray", size  =3)+
+  geom_smooth(color = "black", se = F, size = 2)+
+  facet_wrap(~index, scales = "free_x", nrow =2)+
+  theme_minimal_hgrid()+
+  labs(x = "Mean index value in the image",
+       y = "Disease severity (%)")+
+  theme(panel.border = element_rect(color = "gray"))
+index_gg_pi
+```
+
+```{r}
+plot_grid(
+  plot_grid(NULL,rgb_gg_pi,NULL, rel_widths =c(0.18,1,0.2), nrow = 1),
+          index_gg_pi,
+          nrow = 2,
+          rel_heights = c(0.5,1))
+ggsave("figs/index_sev_pi.png", dpi = 500, height = 8, width = 10)
+```
+
+```{r}
+cor_PI = all_data_PI %>% 
+  group_by(index) %>% 
+  dplyr::summarise(cor = round(  cor.test(mean,sev, method = "spearman")$estimate,3),
+                   P_value = round(cor.test(mean,sev, method = "spearman")$p.value,4)) %>% 
+  arrange(-cor)
+cor_PI
+```
+
+### Spread df
+
+```{r}
+all_data_spread_plb = all_data_PI %>% 
+  pivot_wider(id_col = c(file,sev),
+              names_from = index, 
+              values_from =  mean)   
+
+all_data_spread_plb
+```
+
+### GBM
+
+```{r}
+train=sample(x = 1:length(all_data_spread_plb$sev), 
+             size = round(0.75*length(all_data_spread_plb$sev),1))
+# length(train)
+gbm.fit = gbm(sev ~BGI+BI+GLI+HI+HUE+NGRDI+VARI+gray+ Red+Green+Blue  + SI + SCI,
+             data = all_data_spread_plb[train,],
+             distribution = "gaussian",
+              n.trees = 1000,
+             interaction.depth = 3,
+             shrinkage = 0.1,
+             cv.folds = 5,
+             n.cores = NULL, # will use all cores by default
+             verbose = FALSE)
+print(gbm.fit)
+sqrt(min(gbm.fit$cv.error))
+```
+
+```{r}
+gbm.perf(gbm.fit, method = "cv")
+# find index for n trees with minimum CV error
+```
+
+```{r}
+min_MSE <- which.min(gbm.fit$cv.error)
+sqrt(gbm.fit$cv.error[min_MSE])
+```
+
+```{r}
+# best.iter <- gbm.perf(model1, method = "test")
+# print(best.iter)
+
+pred = predict(gbm.fit, newdata = all_data_spread_plb[-train,-1], ntrees = 5000 )
+
+sqrt(mean(((pred)-all_data_spread_plb$sev[-train])^2))
+CCC((pred), all_data_spread_plb$sev[-train])$rho.c$est
+
+plot((pred), (pred)-all_data_spread_plb$sev[-train])
+abline(a=0,b=0)
+```
+
+### Testing various hyperparameters
+
+Create hyperparameter grid
+
+```{r}
+
+hyper_grid <- expand.grid(
+  shrinkage = c(.001, .01, .1, .3),
+  interaction.depth = c(1, 3, 5, 6),
+  n.minobsinnode = c(5, 10, 15),
+  bag.fraction = c(.5,.65, .8, 1), 
+  optimal_trees = 0,               # a place to dump results
+  min_RMSE = 0,
+  CCC =0 # a place to dump results
+)
+# total number of combinations
+nrow(hyper_grid)
+```
+
+```{r message=TRUE}
+# randomize data
+set.seed(123)
+train=sample(x = 1:length(all_data_spread_plb$sev), 
+             size = round(0.80*length(all_data_spread_plb$sev),1))
+
+# grid search 
+for(i in 1:nrow(hyper_grid)) {
+
+# reproducibility
+set.seed(123)
+
+
+ # train model
+gbm.tune <- gbm(
+  formula = sev ~BGI+BI+GLI+HI+HUE+NGRDI+VARI+gray+ Red+Green+Blue  + SI + SCI, 
+  data = all_data_spread_plb[train,],
+  distribution = "gaussian",
+  n.trees = 5000,
+  interaction.depth = hyper_grid$interaction.depth[i],
+  shrinkage = hyper_grid$shrinkage[i],
+  n.minobsinnode = hyper_grid$n.minobsinnode[i],
+  bag.fraction = hyper_grid$bag.fraction[i],
+  train.fraction = .75,
+  n.cores = NULL, # will use all cores by default
+  verbose = FALSE)
+
+pred = predict(gbm.tune, newdata = all_data_spread_plb[-train,-1], ntrees = 5000 )
+ # add min training error and trees to grid
+  hyper_grid$optimal_trees[i] <- which.min(gbm.tune$valid.error)
+  hyper_grid$min_RMSE[i] <- sqrt(min(gbm.tune$valid.error))
+  hyper_grid$CCC[i] = CCC((pred), all_data_spread_plb$sev[-train])$rho.c$est
+  
+}
+
+best_par = hyper_grid %>% 
+  dplyr::arrange(-CCC) %>%
+  head(10)
+best_par
+# gbm.tune$fit
+```
+
+### Best model
+
+```{r}
+# for reproducibility
+set.seed(123)
+
+# train GBM model
+gbm.fit.final_plb <- gbm(
+  formula = sev ~BGI+BI+GLI+HI+HUE+NGRDI+VARI+gray+ Red+Green+Blue  + SI + SCI, 
+  data = all_data_spread_plb[train,],
+  distribution = "gaussian",
+  n.trees = best_par$optimal_trees[1],
+  interaction.depth = best_par$interaction.depth[1],
+  shrinkage = best_par$shrinkage[1],
+  n.minobsinnode = best_par$n.minobsinnode[1],
+  bag.fraction = best_par$bag.fraction[1], 
+  train.fraction =0.75,
+  n.cores = NULL, # will use all cores by default
+  verbose = FALSE
+  )
+
+
+```
+
+### Relative influence
+
+```{r}
+par(mar = c(5, 8, 1, 1))
+summary_gbm_plb = summary(
+  gbm.fit.final_plb, 
+  cBars = 13,
+  method = relative.influence, # also can use permutation.test.gbm
+  las = 2
+  )
+
+rel_plb = summary_gbm_plb  %>% 
+  rownames_to_column("index") %>% 
+  ggplot(aes(rel.inf, reorder(var, rel.inf)))+
+  geom_col(aes(fill =rel.inf>1, color =rel.inf>1 ), width = 0.85)+
+  theme_minimal_vgrid()+
+  labs(x = "Relative influence (%)",
+       y = "Model predictors",
+       fill = "RI > 1%",
+       color = "RI > 1%")
+rel_plb
+# ggsave("figs/var_influence.png",dpi = 600, height = 4, width = 6)
+```
+
+Partial dependence plots
+
+```{r}
+gbm.fit.final_plb %>%
+  pdp::partial(pred.var = "BGI", n.trees = gbm.fit.final_plb$n.trees, grid.resolution = 100) %>%
+  ggplot(aes( BGI,(yhat)))+
+  geom_line()
+```
+
+LIME
+
+```{r}
+library(lime)
+```
+
+```{r}
+model_type.gbm <- function(x, ...) {
+  return("regression")
+}
+
+predict_model.gbm <- function(x, newdata, ...) {
+  pred <- predict(x, newdata, n.trees = x$n.trees)
+  return(as.data.frame(pred))
+}
+```
+
+```{r}
+# get a few observations to perform local interpretation on
+local_obs <- (all_data_spread_plb[-train,])[1:4, ]
+
+# apply LIME
+explainer <- lime(all_data_spread_plb[train,], gbm.fit.final_plb)
+explanation <- lime::explain(local_obs, explainer, n_features = 7, n.trees =1)
+plot_features(explanation)
+
+
+```
+
+## Prediction
+
+```{r}
+# predict values for test data
+pred <- predict(gbm.fit.final_plb, n.trees = gbm.fit.final_plb$n.trees, all_data_spread_plb[-train,])
+
+# results
+caret::RMSE(pred, all_data_spread_plb[-train,]$sev)
+CCC(pred, all_data_spread_plb$sev[-train])$rho.c$est
+cor(pred, all_data_spread_plb$sev[-train])^2
+```
+
+```{r}
+accuracy_pi =data.frame(predi=pred, actual = all_data_spread_plb$sev[-train]) %>% 
+  summarise(RMSE = caret::RMSE(pred, actual),
+            r = cor(pred, actual),
+            s.shift = CCC(pred, actual)$s.shift,
+            l.shift = CCC(pred, actual)$l.shift,
+            C.b = CCC(pred, actual)$C.b,
+            CCC = CCC(pred, actual)$rho.c$est,
+            CIS = paste(
+  round(CCC(pred, all_data_spread_plb$sev[-train])$rho.c[2],2),","," ",
+  round(CCC(pred, all_data_spread_plb$sev[-train])$rho.c[3],2),sep = ""
+  ))
+accuracy_pi
+```
+
+
+
+#### plot
+```{r}
+
+conc_pi = data.frame(predict = pred, actual =all_data_spread_plb$sev[-train]) %>% 
+ggplot(aes(actual,predict))+
+  geom_point(size =2, color = "gray")+
+  geom_abline(intercept = 0, slope= 1, size = .81, color = "black", linetype = "dashed")+
+  geom_smooth(method = "lm", 
+              color = "red",
+              size =.81, se =F,
+              fullrange=T)+
+  theme_minimal_grid()+
+  labs(x = "Predicted Severity (%)",
+       y = "Actual Severity (%)")+
+  coord_equal(xlim = c(0,100),
+              ylim = c(0,100))+
+  xlim(0,100)
+
+
+# ggsave("figs/concordance.png", dpi = 600, height = 3.5, width = 4)
+
+```
+
+# Calonectria leaf blight
+
+```{r eval=FALSE, include=TRUE}
+pics<-list.files("./pics/01-Calonectria_leaf_bligth")
+# length(pics)
+#indices
+index = c("BI","SCI","GLI","HI","SI","VARI","HUE","BGI","NGRDI")
+
+
+box = data.frame()
+
+for(i in 1:length(pics)){
+
+EX.L1<-stack(paste("./pics/01-Calonectria_leaf_bligth/",pics[i],sep = ""))
+EX.L1<-aggregate(EX.L1, fact=7)
+EX.L.Shape<-fieldPolygon(mosaic=EX.L1, extent=T, plot = F)
+
+EX1.Indices<- fieldIndex(mosaic = EX.L1,
+                         index = index, 
+                         myIndex = c("Green"), plot = F)
+
+EX.L2<-fieldMask(mosaic=EX.L1,  myIndex = c("Blue"), cropValue=175, cropAbove=T, plot = F)
+
+cut = mask(EX.L1, EX.L2$newMosaic)
+EX.L4<-fieldIndex(mosaic=cut,
+                  index =index,
+                  plot =F)
+
+
+df = as(EX.L4, "SpatialPixelsDataFrame")
+dff = as.data.frame(df) %>% 
+  mutate(gray = 0.299*Red+0.587*Green+0.114*Blue) %>% 
+  gather(c(1:(3+length(index)),15), key = "index", value = "value" ) %>%
+  filter(!is.na(value),
+         !is.infinite(value)) %>% 
+  group_by(index) %>% 
+  dplyr::summarise(mean = mean(value, na.rm = T),
+            std = sd(value),
+            Q25 = quantile(value,0.25),
+            Q50 = quantile(value,0.50),
+            Q75 = quantile(value,0.75)) %>% 
+  mutate(leaf = pics[i])
+
+
+box = box %>% 
+  bind_rows(dff)}
+length(unique(box$leaf))
+write.table(box,"data/indexes_calonec.txt")
+```
+
+```{r}
+box = read.table("data/indexes_calonec.txt")
+```
+
+```{r}
+data_calo_load = gsheet2tbl("https://docs.google.com/spreadsheets/d/1D5Cn6CND8OjQwdv_AVt_sxJ0H21DjIQnfmB7HKwqYXI/edit?usp=sharing") %>% 
+  mutate(file = as.character(file)) %>% 
+  dplyr::select(file,area_total,area_doente_roxa,area_doente,sev_roxa,sev)
+head(data_calo_load)
+```
+
+```{r}
+data_calo = box %>% 
+  separate(leaf, into=c("file","format"), sep =".jpg") %>% 
+  dplyr::select(-format) %>% 
+  full_join(data_calo_load, by="file") %>% 
+  mutate(sev=sev_roxa)
+# data_calo
+
+length(unique(data_calo$sev))
+```
+```{r}
+summary(data_calo$sev)
+```
+
+
+### Images
+
+
+```{r}
+hist_sev_calo =  data_calo %>% 
+  pivot_wider(id_col = c(file,sev_roxa),
+              names_from = index, 
+              values_from =  mean) %>%
+  ggplot(aes(sev_roxa))+
+  geom_histogram(color = "white", fill = "black", bins = 20)+
+  theme_minimal_hgrid(font_size = 10)+
+  labs(x = "Severity (%)",
+       y = "Frequency")+
+  scale_x_continuous(limits = c(-5,105), breaks = seq(0,100,25))+
+  # theme_void()+
+  # coord_fixed()+
+  theme(panel.background = element_rect(color = "black"),
+        axis.title.y = element_text(size=8))
+
+```
+
+```{r}
+EX.L1<-stack(paste("./pics/01-Calonectria_leaf_bligth/","57.jpg",sep = ""))
+EX.L1<-aggregate(EX.L1, fact=7)
+EX.L.Shape<-fieldPolygon(mosaic=EX.L1, extent=T, plot = F)
+
+# EX1.Indices<- fieldIndex(mosaic = EX.L1,
+#                          index = index, 
+#                          myIndex = c("Green"), plot = F)
+
+EX.L2<-fieldMask(mosaic=EX.L1,  myIndex = c("Blue"), cropValue=175, cropAbove=T, plot = F)
+
+cut = mask(EX.L1, EX.L2$newMosaic)
+EX.L4<-fieldIndex(mosaic=cut,
+                  index =index,
+                  plot =F)
+# plot(EX.L4$HUE)
+```
+
+```{r}
+rgb_fig_calo = RStoolbox::ggRGB(EX.L2$newMosaic,
+                 r = 1,
+                 g = 2,
+                 b = 3)+
+  theme_map()+
+  coord_fixed()+
+  theme(panel.background = element_rect(color = "white"))
+
+
+gli_fig_calo = as.data.frame(EX.L4$HUE, xy=TRUE, na.rm =T) %>% 
+  ggplot(aes(x, y, fill = HUE))+
+  geom_tile()+
+  scale_fill_viridis_c(option = "B",direction = -1)+
+  theme_map()+
+  coord_fixed()+
+  theme(panel.background = element_rect(color = "white"),
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 8))
+
+rgb_fig_calo+ gli_fig_calo
+```
+
+```{r fig.height=9, fig.width=7}
+rgb_fig_sbr + gli_fig_sbr + hist_sev_sbr +
+  rgb_fig_xy + gli_fig_xy +hist_sev_xy+
+  rgb_fig_calo + gli_fig_calo + hist_sev_calo+
+  rgb_fig_wlb + gli_fig_wlb + hist_sev_WLB+
+  rgb_fig_pi + gli_fig_pi + hist_sev_pi+
+   plot_layout(widths = c(1, 1, 1),
+               heights = c(1,1,1,1,1))+
+  plot_annotation(tag_levels = 'A')&
+  theme(legend.key.size = unit(3, 'mm'),
+        legend.text = element_text(size =6))
+
+ggsave("figs/leaf_gli.png",dpi = 600, height = 9, width =7)
+```
+
+
+
+### Relationship sev indices
+
+
+```{r}
+ rgb_gg_calo =  data_calo %>% 
+  filter(index %in% c("Red", "Blue", "Green")) %>%
+    ggplot(aes(mean, sev_roxa, color = index)) + 
+  # geom_text()+
+  geom_point(color = "gray", size  =3)+
+  geom_smooth(se = F, size = 2)+
+  facet_wrap(~index, scales = "free_x", nrow =1)+
+  scale_color_manual(values = c("steelblue","darkgreen", "darkred"))+
+  theme_minimal_hgrid()+
+  labs(x = "Mean value in the image",
+       y = "Disease severity (%)")+
+  theme(panel.border = element_rect(color = "gray"))+
+  theme(legend.position = "none")
+rgb_gg_calo
+```
+
+
+```{r}
+index_gg_calo = data_calo %>% 
+  filter(!index %in% c("Red", "Blue", "Green")) %>% 
+    ggplot(aes(mean, sev_roxa, label = file)) + 
+  # geom_text()+
+  geom_point(color = "gray", size  =3)+
+  geom_smooth(color = "black", se = F, size = 2)+
+  facet_wrap(~index, scales = "free_x", nrow =2)+
+  theme_minimal_hgrid()+
+  labs(x = "Mean index value in the image",
+       y = "Disease severity (%)")+
+  theme(panel.border = element_rect(color = "gray"))
+index_gg_calo
+```
+
+```{r}
+plot_grid(
+  plot_grid(NULL,rgb_gg_calo,NULL, rel_widths =c(0.18,1,0.2), nrow = 1),
+          index_gg_calo,
+          nrow = 2,
+          rel_heights = c(0.5,1))
+ggsave("figs/index_sev_calo.png", dpi = 500, height = 8, width = 10)
+```
+
+
+```{r}
+cor_calo = data_calo %>% 
+  group_by(index) %>% 
+  dplyr::summarise(cor = round(  cor.test(mean,sev_roxa, method = "spearman")$estimate,3),
+                   P_value = round(cor.test(mean,sev_roxa, method = "spearman")$p.value,4)) %>% 
+  arrange(-cor)
+cor_calo
+```
+
+### Spread df
+
+```{r}
+all_data_spread_calo = data_calo %>% 
+  pivot_wider(id_col = c(file,sev_roxa),
+              names_from = index, 
+              values_from =  mean) %>% 
+  mutate(sev = sev_roxa) %>% 
+  dplyr::select(-sev_roxa)
+
+all_data_spread_calo
+```
+
+### GBM
+
+```{r}
+train=sample(x = 1:length(all_data_spread_calo$sev), 
+             size = round(0.75*length(all_data_spread_calo$sev),1))
+# length(train)
+gbm.fit = gbm(sev ~BGI+BI+GLI+HI+HUE+NGRDI+VARI+gray+ Red+Green+Blue  + SI + SCI,
+             data = all_data_spread_calo[train,],
+             distribution = "gaussian",
+              n.trees = 1000,
+             interaction.depth = 3,
+             shrinkage = 0.1,
+             cv.folds = 5,
+             n.cores = NULL, # will use all cores by default
+             verbose = FALSE)
+print(gbm.fit)
+sqrt(min(gbm.fit$cv.error))
+```
+
+```{r}
+gbm.perf(gbm.fit, method = "cv")
+# find index for n trees with minimum CV error
+```
+
+```{r}
+min_MSE <- which.min(gbm.fit$cv.error)
+sqrt(gbm.fit$cv.error[min_MSE])
+```
+
+```{r}
+# best.iter <- gbm.perf(model1, method = "test")
+# print(best.iter)
+
+pred = predict(gbm.fit, newdata = all_data_spread_calo[-train,-1], ntrees = 5000 )
+
+sqrt(mean(((pred)-all_data_spread_calo$sev[-train])^2))
+CCC((pred), all_data_spread_calo$sev[-train])$rho.c$est
+
+plot((pred), (pred)-all_data_spread_calo$sev[-train])
+abline(a=0,b=0)
+```
+
+### Testing various hyperparameters
+
+Create hyperparameter grid
+
+```{r}
+
+hyper_grid <- expand.grid(
+  shrinkage = c(.001, .01, .1, .3),
+  interaction.depth = c(1, 3, 5, 6),
+  n.minobsinnode = c(5, 10, 15),
+  bag.fraction = c(.5,.65, .8, 1), 
+  optimal_trees = 0,               # a place to dump results
+  min_RMSE = 0,
+  CCC =0 # a place to dump results
+)
+# total number of combinations
+nrow(hyper_grid)
+```
+
+```{r}
+# randomize data
+set.seed(1234)
+train=sample(x = 1:length(all_data_spread_calo$sev), 
+             size = round(0.80*length(all_data_spread_calo$sev),1))
+
+# grid search 
+for(i in 1:nrow(hyper_grid)) {
+
+# reproducibility
+set.seed(123)
+
+
+ # train model
+gbm.tune <- gbm(
+  formula = sev ~BGI+BI+GLI+HI+HUE+NGRDI+VARI+gray+ Red+Green+Blue  + SI + SCI, 
+  data = all_data_spread_calo[train,],
+  distribution = "gaussian",
+  n.trees = 5000,
+  interaction.depth = hyper_grid$interaction.depth[i],
+  shrinkage = hyper_grid$shrinkage[i],
+  n.minobsinnode = hyper_grid$n.minobsinnode[i],
+  bag.fraction = hyper_grid$bag.fraction[i],
+  train.fraction = .75,
+  n.cores = NULL, # will use all cores by default
+  verbose = FALSE)
+
+pred = predict(gbm.tune, newdata = all_data_spread_calo[-train,-1], ntrees = 5000 )
+ # add min training error and trees to grid
+  hyper_grid$optimal_trees[i] <- which.min(gbm.tune$valid.error)
+  hyper_grid$min_RMSE[i] <- sqrt(min(gbm.tune$valid.error))
+  hyper_grid$CCC[i] = CCC((pred), all_data_spread_calo$sev[-train])$rho.c$est
+  
+}
+
+best_par = hyper_grid %>% 
+  dplyr::arrange(-CCC) %>%
+  head(10)
+best_par
+# gbm.tune$fit
+```
+
+### Best model
+
+```{r}
+# for reproducibility
+set.seed(123)
+
+# train GBM model
+gbm.fit.final_calo <- gbm(
+  formula = sev ~BGI+BI+GLI+HI+HUE+NGRDI+VARI+gray+ Red+Green+Blue  + SI + SCI, 
+  data = all_data_spread_calo[train,],
+  distribution = "gaussian",
+  n.trees = best_par$optimal_trees[1],
+  interaction.depth = best_par$interaction.depth[1],
+  shrinkage = best_par$shrinkage[1],
+  n.minobsinnode = best_par$n.minobsinnode[1],
+  bag.fraction = best_par$bag.fraction[1], 
+  train.fraction =0.75,
+  n.cores = NULL, # will use all cores by default
+  verbose = FALSE
+  )
+
+
+```
+
+### Relative influence
+
+```{r}
+par(mar = c(5, 8, 1, 1))
+summary_gbm_calo = summary(
+  gbm.fit.final_calo, 
+  cBars = 13,
+  method = relative.influence, # also can use permutation.test.gbm
+  las = 2
+  )
+
+rel_calo = summary_gbm_calo %>% 
+  rownames_to_column("index") %>% 
+  ggplot(aes(rel.inf, reorder(var, rel.inf)))+
+  geom_col(aes(fill =rel.inf>1, color =rel.inf>1 ), width = 0.85)+
+  theme_minimal_vgrid()+
+  labs(x = "Relative influence (%)",
+       y = "Model predictors",
+       fill = "RI > 1%",
+       color = "RI > 1%")
+rel_calo
+# ggsave("figs/var_influence.png",dpi = 600, height = 4, width = 6)
+```
+
+Partial dependence plots
+
+```{r}
+gbm.fit.final_calo %>%
+  pdp::partial(pred.var = "HUE", n.trees = gbm.fit.final_calo$n.trees, grid.resolution = 100) %>%
+  ggplot(aes( HUE,(yhat)))+
+  geom_line()
+```
+
+LIME
+
+```{r}
+library(lime)
+```
+
+```{r}
+model_type.gbm <- function(x, ...) {
+  return("regression")
+}
+
+predict_model.gbm <- function(x, newdata, ...) {
+  pred <- predict(x, newdata, n.trees = x$n.trees)
+  return(as.data.frame(pred))
+}
+```
+
+```{r}
+# get a few observations to perform local interpretation on
+local_obs <- (all_data_spread_calo[-train,])[1:4, ]
+
+# apply LIME
+explainer <- lime(all_data_spread_calo[train,], gbm.fit.final_calo)
+explanation <- lime::explain(local_obs, explainer, n_features = 7, n.trees =1)
+plot_features(explanation)
+
+
+```
+
+## Prediction
+
+```{r}
+# predict values for test data
+pred <- predict(gbm.fit.final_calo, n.trees = gbm.fit.final_calo$n.trees, all_data_spread_calo[-train,])
+
+# results
+caret::RMSE(pred, all_data_spread_calo[-train,]$sev)
+CCC(pred, all_data_spread_calo$sev[-train])$rho.c$est
+cor(pred, all_data_spread_calo$sev[-train])^2
+```
+
+```{r}
+accuracy_calo = data.frame(predi=pred, actual = all_data_spread_calo$sev[-train]) %>% 
+  summarise(RMSE = caret::RMSE(pred, actual),
+            r = cor(pred, actual),
+            s.shift = CCC(pred, actual)$s.shift,
+            l.shift = CCC(pred, actual)$l.shift,
+            C.b = CCC(pred, actual)$C.b,
+            CCC = CCC(pred, actual)$rho.c$est,
+            CIS = paste(
+  round(CCC(pred, all_data_spread_calo$sev[-train])$rho.c[2],2),","," ",
+  round(CCC(pred, all_data_spread_calo$sev[-train])$rho.c[3],2),sep = ""
+  ))
+accuracy_calo
+```
+
+
+
+
+#### plot
+```{r}
+
+conc_calo = data.frame(predict = pred, actual =all_data_spread_calo$sev[-train]) %>% 
+ggplot(aes(actual,predict))+
+  geom_point(size =2, color = "gray")+
+  geom_abline(intercept = 0, slope= 1, size = .81, color = "black", linetype = "dashed")+
+  geom_smooth(method = "lm", 
+              color = "red",
+              size =.81, se =F,
+              fullrange=T)+
+  theme_minimal_grid()+
+  labs(x = "Predicted Severity (%)",
+       y = "Actual Severity (%)")+
+  coord_equal(xlim = c(0,100),
+              ylim = c(0,100))+
+  xlim(0,100)
+
+
+# ggsave("figs/concordance.png", dpi = 600, height = 3.5, width = 4)
+
+```
+
+
+
+# Correlation
+
+```{r}
+ind_order = c("Red","Green","Blue","BI","SCI","GLI","HI","NGRDI","SI","VARI","HUE","BGI","gray")
+bind_rows(
+cor_sbr %>% mutate(disease="SBR"),
+cor_calo %>% mutate(disease="CLB"),
+cor_xy %>% mutate(disease="NtXf"),
+cor_wlb %>% mutate(disease="WLB"),
+cor_PI %>% mutate(disease="PLB")) %>% 
+  mutate(sig = case_when(P_value <0.05 ~ " ",
+                         P_value >0.05 ~ "P>0.05")) %>% 
+  mutate(disease = factor(disease, levels = c("PLB", "WLB","NtXf","CLB", "SBR")),
+         index = factor(index, levels = ind_order)) %>% 
+  ggplot(aes(index,disease, fill = cor, label = round(cor,3)))+
+  geom_tile()+
+  geom_text(size =3.5)+
+  geom_point(aes(index,disease, color = sig), shape = "X", size =8, alpha = 0.6)+
+  # scale_fill_gradient2(low = "darkred", mid = NA, high = "darkgreen")+
+  scale_fill_distiller(palette = "RdBu", direction = 1)+
+  scale_color_manual(values = c(NA,"black"))+
+  theme_half_open()+
+  labs(x = "",
+       y = "", 
+       fill = "  r",
+       color ="")
+ggsave("figs/corr.png",dpi = 600, height = 3.5, width =10)
+```
+
+
+
+
+
+# Relative influence combo
+```{r}
+summary_gbm_sbr
+summary_gbm_calo
+summary_gbm_xy
+summary_gbm_wlb
+summary_gbm_plb
+```
+
+
+```{r}
+rel_sbr + labs(title = paste("Soybean rust"))+
+  rel_calo +labs(title = paste("Calonectria leaf blight"))+
+  rel_wlb +labs(title = paste("Wheat leaf blast"))+
+  rel_plb +labs(title = paste("Potato late blight"))+
+  rel_xy +labs(title = expression(bolditalic("N. tabacum-X. fastidiosa")))+guide_area()+
+  plot_layout(ncol =3, guides = "collect")+
+  plot_annotation(tag_levels = 'A')&
+  theme_minimal_grid(font_size = 9)&
+  theme(plot.title = element_text(size =8))&
+  xlim(0,100)
+ggsave("figs/relative_influence_combo.png", dpi = 300, height = 5, width = 6)
+```
+```{r}
+biplot_ri = function(data_cor, data_ri, title, face="plain"){
+
+data_ri %>% 
+  rename(index = var) %>% 
+  full_join(data_cor) %>% 
+  ggplot(aes(rel.inf,abs(cor),label = index, color = index))+
+  # geom_smooth(color = "gray90",se = F)+
+  geom_point(size = 3)+
+  ggrepel::geom_text_repel(size=3)+
+  coord_cartesian(xlim = c(0,100),
+                  ylim = c(0,1))+
+  theme_minimal()+
+  theme(legend.position = "none",
+        panel.grid = element_blank(),
+        plot.title = element_text(size = 10, face = face),
+        axis.ticks = element_line(color = "gray"),
+        axis.line = element_line(color = "gray"))+
+  labs(y = "Absolute Spearman's r",
+       x = "Relative Influence (%)",
+       title  = paste(title))
+}
+```
+
+
+```{r}
+biplot_ri(data_cor = cor_sbr, data_ri = summary_gbm_sbr, title = "Soybean rust")+
+biplot_ri(data_cor = cor_calo, data_ri = summary_gbm_calo, title = "Calonectria leaf blight")+
+  biplot_ri(data_cor = cor_xy, data_ri = summary_gbm_xy, title = "N. tabacum-X. fastidiosa",face = "italic")+
+  biplot_ri(data_cor = cor_wlb, data_ri = summary_gbm_wlb, title = "Wheat leaf blast")+
+  biplot_ri(data_cor = cor_PI, data_ri = summary_gbm_plb, title = "Potato late blight")+
+  plot_layout(nrow = 3,
+              ncol = 2)+
+  plot_annotation(tag_levels = "A")+
+ggsave("figs/ri_cor.png",dpi = 300, height = 8, width =6)
+
+```
+
+
+
+
+### Agreement
+
+```{r}
+ conc_sbr+labs(title = paste("Soybean rust"),
+               subtitle = paste("RMSE = ",round(accuracy_sbr$RMSE,2),", ",
+                                "CCC = ",round(accuracy_sbr$CCC,3)))+
+  conc_calo+labs(title = paste("Calonectria leaf blight"),
+               subtitle = paste("RMSE = ",round(accuracy_calo$RMSE,2),", ",
+                                "CCC = ",round(accuracy_calo$CCC,3)))+
+  conc_wlb+labs(title = paste("Wheat leaf blast"),
+               subtitle = paste("RMSE = ",round(accuracy_wlb$RMSE,2),", ",
+                                "CCC = ",round(accuracy_wlb$CCC,3)))+
+  conc_pi+labs(title = paste("Potato late blight"),
+               subtitle = paste("RMSE = ",round(accuracy_pi$RMSE,2),", ",
+                                "CCC = ",round(accuracy_pi$CCC,3)))+
+  conc_xy+labs(title = expression(bolditalic("N. tabacum-X. fastidiosa")),
+               subtitle = paste("RMSE = ",round(accuracy_xy$RMSE,2),", ",
+                                "CCC = ",round(accuracy_xy$CCC,3)))+
+  
+  
+   plot_layout(ncol = 3,
+               widths = c(1, 1,1),
+               heights = c(1,1))+
+
+  plot_annotation(tag_levels = 'A')&
+    theme_minimal_grid(font_size = 10)&
+  theme(plot.title = element_text(size =10, face ="bold"),
+      plot.subtitle = element_text(size =10, face = "plain"))
+
+ggsave("figs/concordance.png", dpi = 600, height = 6, width = 8)
+```
+
+# RGB bands by leaf
+
+
+
+#### Function
+
+```{r}
+density_rgb2 = function(
+file_low = "./pics/01-soybean-rust-bg-blue/Ferrugem 52_Median.jpg",
+file_high = "./pics/01-soybean-rust-bg-blue/Ferrugem 49_Median.jpg",
+limiar = 100,
+index_cut = "Blue",
+cropAbove=T,
+title = "Soybean Rust",face = "plain"){
+
+#-------------------------------------------------------------------------------------------------
+SBR_low_EX.L1<-stack(paste(file_low ))
+SBR_low_EX.L1<-aggregate(SBR_low_EX.L1, fact=5)
+
+SBR_low_EX.L2<-fieldMask(mosaic=SBR_low_EX.L1, myIndex = c(index_cut), cropValue=limiar, cropAbove=cropAbove, plot = F)
+
+cut = mask(SBR_low_EX.L1, SBR_low_EX.L2$newMosaic)
+SBR_low_EX.L4<-fieldIndex(mosaic=cut,
+                  # index =index,
+                  plot =F)
+
+SBR_low = RStoolbox::ggRGB(SBR_low_EX.L2$newMosaic,r = 1,g = 2,b = 3)+
+  theme_map()+coord_fixed()+
+  theme(panel.background = element_rect(color = NA, fill = NA),
+        plot.title = element_text(size=8, face = "plain"))+
+  labs(title = "Low")
+
+SBR_low_comb = data.frame(R = as.data.frame(SBR_low_EX.L4$Red),
+           G = as.data.frame(SBR_low_EX.L4$Blue),
+           B = as.data.frame(SBR_low_EX.L4$Green)) %>%
+  na.omit() %>% 
+  pivot_longer(1:3,names_to = "band", values_to = "value") %>%
+  mutate(sev="Low")
+#-------------------------------------------------------------------------------------------------
+
+SBR_high_EX.L1<-stack(paste(file_high))
+SBR_high_EX.L1<-aggregate(SBR_high_EX.L1, fact=5)
+
+SBR_high_EX.L2<-fieldMask(mosaic=SBR_high_EX.L1,  myIndex = c(index_cut), cropValue=limiar, cropAbove=cropAbove, plot = F)
+
+cut = mask(SBR_high_EX.L1, SBR_high_EX.L2$newMosaic)
+SBR_high_EX.L4<-fieldIndex(mosaic=cut,
+                  # index =index,
+                  plot =F)
+
+SBR_high = RStoolbox::ggRGB(SBR_high_EX.L2$newMosaic,r = 1,g = 2,b = 3)+
+  theme_map()+coord_fixed()+
+  theme(panel.background = element_rect(color = NA, fill = NA),
+        plot.title = element_text(size=8, face = "plain"))+
+  labs(title = "High")
+
+SBR_high_comb = data.frame(R = as.data.frame(SBR_high_EX.L4$Red),
+           G = as.data.frame(SBR_high_EX.L4$Blue),
+           B = as.data.frame(SBR_high_EX.L4$Green)) %>%
+  na.omit() %>% 
+  pivot_longer(1:3,names_to = "band", values_to = "value") %>%
+  mutate(sev="High")
+
+#-------------------------------------------------------------------------------------------------
+all_comb = bind_rows(SBR_low_comb,SBR_high_comb) %>% 
+  mutate(sev =factor(sev, levels =c("Low","High")))
+#-------------------------------------------------------------------------------------------------
+
+all_comb %>% 
+  ggplot(aes(value,sev))+
+  stat_slab(aes(fill = band), alpha = 0.7)+
+   stat_pointinterval(aes(color = band),
+                      position = position_dodge(width = .5, preserve = "single"),
+                     # color = "gray40",
+                     .width = c(0,0.95))+
+  
+  scale_fill_manual(values = c("blue", "green","red" ))+
+  scale_color_manual(values = c("blue", "green","red" ))+
+  theme_minimal()+
+  xlim(0,255)+
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(size = 10, face = face),
+        axis.ticks = element_line(color = "gray"),
+        axis.line = element_line(color = "gray"))+
+  labs(x = "Pixel intensity",
+       y = "Severity",
+       fill ="",
+       title = paste(title))+  
+  guides(color =F)#+
+  #SBR_low+SBR_high+
+  #plot_layout(widths = c(1, .2,.2))
+}
+```
+
+
+### plots 
+```{r message=FALSE, include=FALSE}
+SBR_dist = density_rgb2()
+calo_dist =density_rgb2(file_low ="./pics/01-Calonectria_leaf_bligth/108.jpg",
+                        file_high = "./pics/01-Calonectria_leaf_bligth/153.jpg",
+                        limiar = 175,index_cut = "Blue",cropAbove=T,
+                        title = "Calonectria leaf blight")
+
+xy_dist = density_rgb2(file_low ="./pics/01-Xylella-tobacco-bg-white/68.jpg",
+                        file_high = "./pics/01-Xylella-tobacco-bg-white/82.jpg",
+                        limiar = 200,index_cut = "Blue", cropAbove=T,
+                        title = "N. tabacum-X. fastidiosa", face = "italic")
+
+
+wlb_dist = density_rgb2(file_low ="./pics/01-Wheat_leaf_blast/G_108_R3.jpg",
+                        file_high = "./pics/01-Wheat_leaf_blast/T_239_R1.jpg",
+                        limiar = 180,index_cut = "Blue",cropAbove=T,
+                        title = "Wheat leaf blast")
+
+plb_dist = density_rgb2(file_low ="./pics/01-potato_late_bligh/PI24_6B.png",
+                        file_high = "./pics/01-potato_late_bligh/PI07_2A.png",
+                        limiar = 1,index_cut = "Red",cropAbove=F,
+                        title = "Potato late blight")
+```
+
+
+
+#### combo
+
+
+```{r fig.height=7, fig.width=6}
+(SBR_dist+calo_dist+xy_dist+wlb_dist+plb_dist+guide_area())+
+  plot_layout(nrow = 3,
+              ncol = 2,
+              tag_level = "keep",
+              # widths = c(1,1,1,1,1),
+              guides = 'collect')+
+  plot_annotation(tag_levels = "A")+
+  # plot_annotation(tag_levels = list(tags2))&
+  theme(legend.key.size = unit(5, 'mm'),
+        legend.position = "none",
+        legend.text = element_text(size =10))
+ggsave("figs/RGB_dens2.png",dpi = 600, height = 7, width =6)
+```
+
+```{r}
+density_rgb_images = function(
+file_low = "./pics/01-soybean-rust-bg-blue/Ferrugem 52_Median.jpg",
+file_high = "./pics/01-soybean-rust-bg-blue/Ferrugem 49_Median.jpg",
+limiar = 100,
+index_cut = "Blue",
+cropAbove=T,
+title = "Soybean Rust",face = "plain"){
+
+#-------------------------------------------------------------------------------------------------
+SBR_low_EX.L1<-stack(paste(file_low ))
+SBR_low_EX.L1<-aggregate(SBR_low_EX.L1, fact=5)
+
+SBR_low_EX.L2<-fieldMask(mosaic=SBR_low_EX.L1, myIndex = c(index_cut), cropValue=limiar, cropAbove=cropAbove, plot = F)
+
+cut = mask(SBR_low_EX.L1, SBR_low_EX.L2$newMosaic)
+SBR_low_EX.L4<-fieldIndex(mosaic=cut,
+                  # index =index,
+                  plot =F)
+
+SBR_low = RStoolbox::ggRGB(SBR_low_EX.L2$newMosaic,r = 1,g = 2,b = 3)+
+  theme_map()+coord_fixed()+
+  theme(panel.background = element_rect(color = NA, fill = NA),
+        plot.title = element_text(size=8, face = "plain"))#+
+  # labs(title = "Low")
+
+SBR_low_comb = data.frame(R = as.data.frame(SBR_low_EX.L4$Red),
+           G = as.data.frame(SBR_low_EX.L4$Blue),
+           B = as.data.frame(SBR_low_EX.L4$Green)) %>%
+  na.omit() %>% 
+  pivot_longer(1:3,names_to = "band", values_to = "value") %>%
+  mutate(sev="Low")
+#-------------------------------------------------------------------------------------------------
+
+SBR_high_EX.L1<-stack(paste(file_high))
+SBR_high_EX.L1<-aggregate(SBR_high_EX.L1, fact=5)
+
+SBR_high_EX.L2<-fieldMask(mosaic=SBR_high_EX.L1,  myIndex = c(index_cut), cropValue=limiar, cropAbove=cropAbove, plot = F)
+
+cut = mask(SBR_high_EX.L1, SBR_high_EX.L2$newMosaic)
+SBR_high_EX.L4<-fieldIndex(mosaic=cut,
+                  # index =index,
+                  plot =F)
+
+SBR_high = RStoolbox::ggRGB(SBR_high_EX.L2$newMosaic,r = 1,g = 2,b = 3)+
+  theme_map()+coord_fixed()+
+  theme(panel.background = element_rect(color = NA, fill = NA),
+        plot.title = element_text(size=8, face = "plain"))#+
+  # labs(title = "High")
+
+SBR_high_comb = data.frame(R = as.data.frame(SBR_high_EX.L4$Red),
+           G = as.data.frame(SBR_high_EX.L4$Blue),
+           B = as.data.frame(SBR_high_EX.L4$Green)) %>%
+  na.omit() %>% 
+  pivot_longer(1:3,names_to = "band", values_to = "value") %>%
+  mutate(sev="High")
+
+#-------------------------------------------------------------------------------------------------
+all_comb = bind_rows(SBR_low_comb,SBR_high_comb) %>% 
+  mutate(sev =factor(sev, levels =c("Low","High")))
+#-------------------------------------------------------------------------------------------------
+
+# all_comb %>% 
+#   ggplot(aes(value,sev))+
+#   stat_slab(aes(fill = band), alpha = 0.7)+
+#    stat_pointinterval(aes(color = band),
+#                       position = position_dodge(width = .5, preserve = "single"),
+#                      # color = "gray40",
+#                      .width = c(0,0.95))+
+#   
+#   scale_fill_manual(values = c("blue", "green","red" ))+
+#   scale_color_manual(values = c("blue", "green","red" ))+
+#   theme_minimal()+
+#   xlim(0,255)+
+#   theme(panel.grid = element_blank(),
+#         plot.title = element_text(size = 10, face = face),
+#         axis.ticks = element_line(color = "gray"),
+#         axis.line = element_line(color = "gray"))+
+#   labs(x = "Pixel intensity",
+#        y = "Severity",
+#        fill ="",
+#        title = paste(title))+  
+#   guides(color =F)#+
+  SBR_low|SBR_high
+  #plot_layout(widths = c(1, .2,.2))
+}
+```
+
+
+### plots 
+```{r message=FALSE, include=FALSE}
+SBR_dist_img = density_rgb_images()
+calo_dist_img =density_rgb_images(file_low ="./pics/01-Calonectria_leaf_bligth/108.jpg",
+                        file_high = "./pics/01-Calonectria_leaf_bligth/153.jpg",
+                        limiar = 175,index_cut = "Blue",cropAbove=T,
+                        title = "Calonectria leaf blight")
+
+xy_dist_img = density_rgb_images(file_low ="./pics/01-Xylella-tobacco-bg-white/68.jpg",
+                        file_high = "./pics/01-Xylella-tobacco-bg-white/82.jpg",
+                        limiar = 200,index_cut = "Blue", cropAbove=T,
+                        title = "N. tabacum-X. fastidiosa", face = "italic")
+
+
+wlb_dist_img = density_rgb_images(file_low ="./pics/01-Wheat_leaf_blast/G_108_R3.jpg",
+                        file_high = "./pics/01-Wheat_leaf_blast/T_239_R1.jpg",
+                        limiar = 180,index_cut = "Blue",cropAbove=T,
+                        title = "Wheat leaf blast")
+
+plb_dist_img = density_rgb_images(file_low ="./pics/01-potato_late_bligh/PI24_6B.png",
+                        file_high = "./pics/01-potato_late_bligh/PI07_2A.png",
+                        limiar = 1,index_cut = "Red",cropAbove=F,
+                        title = "Potato late blight")
+```
+
+
+
+#### combo
+
+
+```{r fig.height=7, fig.width=6}
+SBR_dist_img/calo_dist_img/xy_dist_img/wlb_dist_img/plb_dist_img+
+  plot_layout(ncol = 1,
+              nrow =5)+
+  plot_annotation(tag_levels = "A")&
+  theme(legend.text = element_text(size =10))
+ggsave("figs/RGB_dens_img.png",dpi = 900, height = 6, width =3)
+```
+
+## Principal component analysis
+### SBR
+```{r}
+pca_sbr = PCA(all_data_spread_sbr[2:15], graph = F)
+biplot_sbr = fviz_pca_biplot(pca_sbr, geom = "point",
+                geom.var = c("text","arrow"),
+                col.ind = all_data_spread_sbr$sev, 
+                col.var = "black",
+                repel = T,
+                labelsize = 2)+
+  labs(title = "Soybean rust")+
+  scale_color_gradient(low = "gray90", high = "gray40", name = "Severity (%)", limits =c(0,100))
+```
+
+### Calonectria
+```{r}
+pca_calo = PCA(all_data_spread_calo[2:15], graph = F)
+biplot_calo = fviz_pca_biplot(pca_calo, geom = "point",
+                geom.var = c("text","arrow"),
+                col.ind = all_data_spread_calo$sev, 
+                col.var = "black",
+                repel = T,
+                labelsize = 2)+
+  labs(title = "Calonectria leaf blight")+
+  scale_color_gradient(low = "gray90", high = "gray40", name = "Severity (%)", limits =c(0,100))
+```
+
+### NtXf
+```{r}
+pca_xy = PCA(all_data_spread_xy[2:15], graph = F)
+biplot_xy = fviz_pca_biplot(pca_xy,  geom = "point",
+                geom.var = c("text","arrow"),
+                col.ind = all_data_spread_xy$sev, 
+                col.var = "black",
+                repel = T,
+                labelsize = 2)+
+  labs(title = expression(italic("N. tabacum-X.fastidiosa")))+
+  scale_color_gradient(low = "gray90", high = "gray40", name = "Severity (%)", limits =c(0,100))
+```
+
+### WLB
+
+
+```{r}
+pca_wlb = PCA(all_data_spread_wlb[2:15], graph = F)
+
+biplot_wlb = fviz_pca_biplot(pca_wlb, geom = "point",
+                geom.var = c("text","arrow"),
+                col.ind = all_data_spread_wlb$sev, 
+                col.var = "black",
+                repel = T,
+                labelsize = 2)+
+  labs(title = "Wheat leaf blast")+
+  scale_color_gradient(low = "gray90", high = "gray40", name = "Severity (%)", limits =c(0,100))
+```
+
+###PLB
+
+```{r}
+pca_plb = PCA(all_data_spread_plb[2:15], graph = F)
+biplot_plb = fviz_pca_biplot(pca_plb, geom = "point",
+                geom.var = c("text","arrow"),
+                col.ind = all_data_spread_plb$sev, 
+                col.var = "black",
+                repel = T,
+                labelsize = 2)+
+  labs(title = "Potato late blight")+
+  scale_color_gradient(low = "gray90", high = "gray40", name = "Severity (%)", limits =c(0,100))
+```
+
+###
+```{r fig.height=8, fig.width=6}
+biplot_sbr+biplot_calo+biplot_xy+biplot_wlb+biplot_plb+guide_area()+
+  plot_layout(ncol = 2,
+              guides = "collect")+
+  plot_annotation(tag_levels = "A")&
+  theme_minimal()+
+  theme(#legend.position = "none",
+        axis.text = element_text(size=8),
+        axis.title = element_text(size=8),
+        plot.title = element_text(size=10),
+        panel.grid = element_blank(),
+        axis.ticks = element_line(color = "gray"),
+        axis.line = element_line(color = "gray"))
+
+ggsave("figs/biplots.png",dpi = 600, height = 8, width =6)
+```
+
