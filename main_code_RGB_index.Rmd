@@ -1,9 +1,4 @@
----
-title: "Untitled"
-author: "Kaique"
-date: "25/10/2020"
-output: html_document
----
+% Data analysis
 
 # Necessary packages
 
