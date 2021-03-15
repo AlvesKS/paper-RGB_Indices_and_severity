@@ -199,7 +199,7 @@ box = read.table("data/indexes_WLB.txt")
 
 
 sev = gsheet2tbl("https://docs.google.com/spreadsheets/d/106sg_O8DeALZpWnxERQNgk8UKgsFbhobWwrl4JXOzbo/edit#gid=0")
-sev
+# sev
 
 
 blast_data = gsheet2tbl("https://docs.google.com/spreadsheets/d/1KnJ9N8jqKPMjCt8jCLv7OqYL9hLyYeK8wkGEBmlGSVI/edit?usp=sharing") %>% 
@@ -366,7 +366,7 @@ all_data_spread_wlb = all_data %>%
   pivot_wider(id_col = c(pic_name,sev),
               names_from = index, 
               values_from =  mean)   
-all_data_spread_wlb
+head(all_data_spread_wlb)
 ```
 
 ## GBM
@@ -431,7 +431,7 @@ hyper_grid <- expand.grid(
 nrow(hyper_grid)
 ```
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 # randomize data
 set.seed(1234)
 train=sample(x = 1:length(all_data_spread_wlb$sev), 
@@ -818,7 +818,7 @@ all_data_spread_sbr = all_data_sbr %>%
               names_from = index, 
               values_from =  mean)   
 
-all_data_spread_sbr
+head(all_data_spread_sbr)
 ```
 
 ## GBM
@@ -883,7 +883,7 @@ hyper_grid <- expand.grid(
 nrow(hyper_grid)
 ```
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 # randomize data
 set.seed(123)
 train=sample(x = 1:length(all_data_spread_sbr$sev), 
@@ -1122,6 +1122,7 @@ write.table(box,"data/indexes_Xylella.txt")
 box = read.table("data/indexes_Xylella.txt")
 ```
 
+## Load
 ```{r}
 data_xy_load = read_csv("data_pics/01-Xylella-tobacco-severity.csv") %>% 
   mutate(file = as.character(File)) %>% 
@@ -1134,7 +1135,7 @@ data_xy = box %>%
   dplyr::select(-format) %>% 
   full_join(data_xy_load, by="file") %>% 
   mutate(sev=ImageJ)
-data_xy
+head(data_xy)
 
 # length(unique(data_xy$sev))
 ```
@@ -1274,7 +1275,7 @@ all_data_spread_xy = data_xy %>%
               names_from = index, 
               values_from =  mean)   
 
-all_data_spread_xy
+head(all_data_spread_xy)
 ```
 
 ## GBM
@@ -1339,7 +1340,7 @@ hyper_grid <- expand.grid(
 nrow(hyper_grid)
 ```
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 # randomize data
 set.seed(123)
 train=sample(x = 1:length(all_data_spread_xy$sev), 
@@ -1754,7 +1755,7 @@ all_data_spread_plb = all_data_PI %>%
               names_from = index, 
               values_from =  mean)   
 
-all_data_spread_plb
+head(all_data_spread_plb)
 ```
 
 ### GBM
@@ -1818,7 +1819,7 @@ hyper_grid <- expand.grid(
 nrow(hyper_grid)
 ```
 
-```{r message=TRUE}
+```{r message=FALSE, warning=FALSE}
 # randomize data
 set.seed(123)
 train=sample(x = 1:length(all_data_spread_plb$sev), 
@@ -2052,6 +2053,8 @@ write.table(box,"data/indexes_calonec.txt")
 box = read.table("data/indexes_calonec.txt")
 ```
 
+
+### Load sev
 ```{r}
 data_calo_load = gsheet2tbl("https://docs.google.com/spreadsheets/d/1D5Cn6CND8OjQwdv_AVt_sxJ0H21DjIQnfmB7HKwqYXI/edit?usp=sharing") %>% 
   mutate(file = as.character(file)) %>% 
@@ -2218,7 +2221,7 @@ all_data_spread_calo = data_calo %>%
   mutate(sev = sev_roxa) %>% 
   dplyr::select(-sev_roxa)
 
-all_data_spread_calo
+head(all_data_spread_calo)
 ```
 
 ### GBM
@@ -2282,7 +2285,7 @@ hyper_grid <- expand.grid(
 nrow(hyper_grid)
 ```
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 # randomize data
 set.seed(1234)
 train=sample(x = 1:length(all_data_spread_calo$sev), 
@@ -2500,11 +2503,11 @@ ggsave("figs/corr.png",dpi = 600, height = 3.5, width =10)
 
 # Relative influence combo
 ```{r}
-summary_gbm_sbr
-summary_gbm_calo
-summary_gbm_xy
-summary_gbm_wlb
-summary_gbm_plb
+# summary_gbm_sbr
+# summary_gbm_calo
+# summary_gbm_xy
+# summary_gbm_wlb
+# summary_gbm_plb
 ```
 
 
